@@ -39,6 +39,7 @@ window.CHEATSHEET_DATA = {
   meta: {
     title: "OSCP Cheatsheet",        // config.site.title
     subtitle: "…",                   // config.site.subtitle
+    tagline: "列挙から root まで。",   // config.site.tagline（ホームの見出し下）
     built_at: "2026-10-19 13:05",    // 生成日時
     vault_name: "Penetration",       // obsidian://open?vault=<vault_name>&file=<path> 用
     note_count: 188,
@@ -73,11 +74,26 @@ window.CHEATSHEET_DATA = {
       commands: [                                 // 検索用。fenced code のうち言語ありのもの
         { lang: "bash", comment: "全 65535 ポートを…", text: "sudo nmap -Pn -p- … <VICTIM_IP>" }
       ],
+      intro: "Impacket v0.14.0 / Kali 標準で導入済み",     // 最初の見出しより前の説明文（無ければ ""）
+      sections: [                                 // getSH 表示用。## ごと（書き換える場所・その他のオプション・詰まったら・関連 は除く）
+        { title: "構文", slug: "構文", kind: "syntax", lead: "", ncmd: 1,
+          subs: [ { title: "", slug: "構文", cmds: [ { lang: "bash", caption: "値は <VICTIM_IP> を…", text: "sudo nmap …" } ] } ] },
+        { title: "2. 全ポートを洗い出す（1 段目）", slug: "2.-全ポートを洗い出す（1-段目）", kind: "step",
+          lead: "まずは「どのポートが開いているか」だけを確定させる。…",   // セクション最初の段落（最初のコマンドより前）
+          ncmd: 1, subs: [ { title: "", cmds: [ … ] } ] }   // ### があれば subs が分かれる
+      ],
+      category: "scan",                           // 所属カテゴリ（config.categories の id）
       mtime: "2026-10-15"
     }
   },
 
-  // 左ナビ。00 Cheatsheet MOC.md の構造をそのまま使う
+  // 左ナビ（getSH 風）。config.categories の順。グループはフォルダの末尾名（例: "445 - smb"）
+  categories: [
+    { id: "scan", title: "スキャン", en: "Scan", icon: ">_", desc: "…", count: 6,
+      groups: [ { title: "Enumeration", notes: ["autorecon", "nmap", …] } ] }
+  ],
+
+  // MOC（00 Cheatsheet MOC.md）の構造。検索の「引きたい状況」と互換用に残す
   nav: [
     { id: "playbook", title: "プレイブック", desc: "列挙の道順。迷ったらここ",
       sections: [ { id: "playbook", title: "14 Methodology", desc: "", entries: [ { note: "00 OSCP Playbook", scene: "…", keywords: "…", sub: null } ] } ] },
@@ -133,109 +149,80 @@ window.CHEATSHEET_DATA = {
 | `> 検索語:` `> 引く場面:` `> 確認日:`、本文中の `検索語: …` 段落 | 本文から除去し `keywords` / `scene` / `checked` へ |
 
 
-## 4. UI 仕様（src/）
+## 4. UI 仕様（src/）— getSH 準拠
 
-### 4.1 画面構成（≥1024px）
+見た目・構成は getSH（https://lizajose.github.io/getSH/）に合わせる。中身（コマンドと説明）だけを Obsidian から取る。
+配色: 背景 `#080e12`、サイドバー `#0c1418`、パネル `#111b1f`、ターミナル `#0b1316`（ヘッダ `#121c20`）、枠 `#25353a`、文字 `#e5edf0`、アクセント青緑 `#6ee7dc`（コマンド文字 `#89e1d8`）、プロンプト緑 `#22c55e`、角丸 8px（ナビは 12px）。ダーク固定。
 
-```
-┌──────────┬──────────────────────────────────────────────────┐
-│ サイト名   │ 変数バー: [ATTACKER_IP][ATTACKER_PORT][VICTIM_IP]…  │ ← sticky
-│ ナビ絞込   │   ▸ その他の変数 / 変数を追加 / クリア   🔍 検索 ☾/☀   │
-│ ▾ プレイ   ├──────────────────────────────────────────────────┤
-│   ブック   │ パンくず: 12 Windows / 88 - kerberos                │
-│ ▾ ポート   │ # GetNPUsers・GetUserSPNs            [Obsidian で開く]│
-│   21 - ftp│ 引く場面: …   検索語: chip chip chip                 │
-│   22 - ssh│ 使う変数: [VICTIM_IP ____] [DOMAIN ____] …           │ ← このノートで使う分だけ
-│   …       │ 目次: 1. … 2. … 3. …                                │
-│ ▸ 状況    │ 本文（コマンドにコピー ボタン、<X> はハイライト）        │
-│ ▸ CVE     │ 関連 / このノートへのリンク                            │
-│ ▸ フォルダ │                                                    │
-└──────────┴──────────────────────────────────────────────────┘
-```
+### 4.1 画面構成
 
-- `<1024px`: 左ナビはドロワー（ハンバーガー）、変数バーは「変数 (3/13 入力済み)」ボタンで開閉
-- 既定はダークテーマ（ターミナル風）。`prefers-color-scheme` を初期値にし、トグルで切替。CSS 変数は `:root` にトークン化
-- フォント: 日本語は `system-ui, "Noto Sans CJK JP", "Hiragino Sans", Meiryo, sans-serif`、コードは `ui-monospace, "JetBrains Mono", "Noto Sans Mono CJK JP", Consolas, monospace`。外部フォント不使用
+- **左サイドバー**（260px・固定）: ロゴ（● ● ● + `OSCP` / `oscp.sh`）→ `NAVIGATION` → カテゴリボタン（`›` + 名前 + 件数。active は `#15302e` / 枠 `#416d69`）→ 最下部に `● READY` ピルとノート数
+- **上部バー**（getSH と同じく sticky。140px スクロールすると変数カードを畳んで `VICTIM_IP=… · USER=…` の 1 行要約になり、クリックで再展開）: 左 `WORKSPACE /<category>/<tool>`、中央に変数カード（`ATTACKER IP` のようなラベル・`反映` チェック・入力欄）を 3 列 × 2 段（ATTACKER_IP, ATTACKER_PORT, VICTIM_IP, VICTIM_PORT, DOMAIN, USER）、右に `⌕ 検索 Ctrl K`・`その他の変数 ▾`・`すべてクリア`・`元に戻す`。「その他の変数」を開くと残りの変数カードと `変数を追加…`（data.placeholders から）、`本文のインラインコードにも反映`
+- **ホーム**（`#/`）: `~/oscp.sh` パス → 大見出し `oscp.sh`（`.sh` がアクセント色）→ タグライン → 説明 → ボタン（AD から始める / スキャンの流れ / 検索）＋右にターミナル（`$ ./oscp.sh --objective`）→ `// OVERVIEW` 統計カード 4 枚 → `// RECENT` 最近見たノート（あれば）→ `// KNOWLEDGE BASE` カテゴリカード（アイコン・名前・説明・件数）→ `// WORKFLOW` ターミナル（プレイブックを `[01]` から順に）
+- **カテゴリ**（`#/c/ID`、`#/n/ID`）: パス → カテゴリ名 → 説明 → 2 カラム。左 `BROWSE`（フォルダごとの小見出し + ツール一覧。選択中は active 色。sticky で、選択中の項目が見える位置まで自動スクロール）、右にツール詳細。getSH は 1 カラムだが、26〜40 本のカテゴリで一覧が本文を押し下げないよう意図的に 2 カラム。`#/c/ID` は `config.categories[].first`（無ければ先頭）のツールを選択した状態。≤1100px では BROWSE をチップ列（高さ 190px まで・グループ見出しなし）にする
+- **ツール詳細**: タイトル → 引く場面 → intro → メタ（フォルダ / 更新日 / Obsidian で開く / 検索語）→ `構文 — まずこれ` ターミナル（`## 構文` のコマンド）→ `すべて閉じる / 開く` → **アコーディオン**（`##` 手順ごと。getSH と同じく先頭だけ開き残りは閉じる。summary = 見出し + `N cmd` + ∨。中身 = lead 段落 → `###` ごとの小見出し → ターミナル。コマンドの無い手順はその節の本文（表・箇条書き）をそのまま埋め込む）→ `詳細 — 書き換える場所 / オプション / 出力例 / 詰まったら / 関連`（閉じた details に元ノート全文）→ このノートへのリンク
+- **ターミナル**: ヘッダ（● ● ● + タイトル + `Copy`）、本文は `# キャプション` 行（元の先頭コメント。`[[リンク]]` と `` `code` `` を解釈）→ `$ コマンド` 行（行末に ⧉ 行コピー）。`Copy` はブロック内の全コマンドを改行区切りで。プロンプトは言語別（bash `$` / powershell `PS>` / cmd `C:\>` / sql `SQL>` / python `>>>` / cypher `neo4j>`）。コマンドは `pre-wrap` で折り返す
+- **例外**: `kind: playbook`、または手順の半数以上にコマンドが無いノート（分岐表・判断ノート、console 転記主体のノート）は、アコーディオンではなく元ノート全文（`.note-body.standalone`）をそのまま表示。`.code` には `コピー`、タスクは保存
+- `#/ext` 外部リファレンス。未知 id は「ノートが見つかりません」
 
 ### 4.2 ルーティング（hash）
 
 | URL | 画面 |
 |---|---|
-| `#/` | ホーム（サイト名・クイックリンク・プレイブック・最近見たノート・件数） |
-| `#/n/ENC_ID` | ノート |
-| `#/n/ENC_ID/ENC_SLUG` | ノートの見出しへスクロール |
-| `#/s/GROUP_ID/SECTION_ID` | セクション一覧（例: 445 - smb。説明 + 引きたい状況 / ノート / 検索語 の一覧） |
-| `#/all` | 全ノート（フォルダ順） |
+| `#/` | ホーム |
+| `#/c/ID` | カテゴリ（先頭のツールを表示） |
+| `#/n/ID` | ツール（所属カテゴリの画面で選択状態） |
+| `#/n/ID/SLUG` | `sec-SLUG` のアコーディオンを開いてスクロール。無ければ詳細内の見出し `SLUG` を開く |
 | `#/ext` | 外部リファレンス |
 
-`document.title` は「ノート名 | サイト名」。履歴は hash 遷移に任せる。
+同じ hash へのクリックでも再描画する（`hashchange` が起きないため）。`document.title` は「ノート名 | サイト名」。
 
 ### 4.3 変数（置換）
 
-- 状態: `{ values: {KEY: "…"}, enabled: {KEY: true}, extra: ["SHARE", …], inlineApply: true }` を `localStorage["cs.vars.v1"]` に保存
-- 表示: `variables` の順。`group` ごとにまとめる（attacker / victim / cred / other）。`other` 群と `extra` は「その他の変数 ▾」で開閉
-- 「変数を追加」: `placeholders` の中で `variables` に無いものを出現回数順に並べて選ばせる → `extra` に入り、入力欄が増える
-- 置換: 変更のたびに本文中の `.ph[data-ph=KEY]` を全部更新。`enabled && value !== ""` → `textContent = value`、class `ph-set`。それ以外 → `textContent = "<KEY>"`、class `ph-unset`（目立つ色で「ここを埋める」と分かるように）
-- `derive: "base_dn"`: BASE_DN が未入力で DOMAIN が入っていれば `corp.com` → `DC=corp,DC=com` を自動で使う（入力欄にはプレースホルダとして薄く表示）
-- `inlineApply`（既定 ON）: OFF の時はインラインコード（`<code>` 直下）の `.ph` は置換しない
-- 「クリア」: 値を全部空にする（確認なし。取り消し用に直前の値を 1 回だけ戻せる「元に戻す」があると良い）
-- `secret: true`（PASSWORD / HASH）: 入力欄は `type="text"` のまま（見えないと打ち間違える）だが、目のアイコンで伏せ字にできる
+- 状態 `{ values, enabled, extra, inlineApply }` を `localStorage["cs.vars.v1"]` に保存。`cs.ui.v2` に「その他の変数」の開閉
+- 置換: `.ph[data-ph=KEY]` を全部更新。`enabled && 値あり` → 値 + `ph-set`、それ以外 → `<KEY>` + `ph-unset`（琥珀色の枠）
+- `derive: "base_dn"`: BASE_DN 未入力で DOMAIN があれば `corp.com` → `DC=corp,DC=com` を自動で使う（入力欄の placeholder にも出す）
+- `inlineApply` OFF の時は詳細本文のインラインコード（`<code>` 直下、`pre` 外）だけ置換しない
+- `すべてクリア` → 直前の値を `元に戻す` で 1 回だけ復元
+- 変数カードの状態: 入力済み = 枠が青緑、既定値のまま = 通常、未入力 = 斜体の例、反映 OFF = 半透明。モバイルの `変数 (n/14 入力済み)` の n は既定値と導出値を含まない
 
-### 4.4 コードブロック
+### 4.4 コピー
 
-- UI が各 `.code` に右上ツールバーを足す: 言語バッジ、`コピー` ボタン
-- コピー: `pre` の `textContent`（置換後）をクリップボードへ。末尾改行は落とす。成功で「コピーしました」(1.5 秒)。未入力の `.ph-unset` が含まれていたら「未入力: VICTIM_IP, DOMAIN」を併記
-- `navigator.clipboard` が無い（`file://` + 一部ブラウザ）時は `execCommand('copy')` にフォールバック
-- `.code-out`（出力例）にもコピーは付けてよいが控えめに
+- 行コピー ⧉ = そのコマンド、ヘッダの `Copy` = ブロック内の全コマンド、詳細内の `.code` = そのブロック（`.code-out` には付けない）
+- コピー文字列は置換後（末尾の空白・改行は除く）。`navigator.clipboard` → 失敗時 `textarea + execCommand`
+- トースト: `コピーしました` / `コピーしました（未入力: VICTIM_IP, DOMAIN）`（警告色）/ `コピーできませんでした`
 
 ### 4.5 検索
 
-- `Ctrl+K` / `⌘K` / `/`（入力欄にフォーカスが無い時）でパレットを開く。`Esc` で閉じる。↑↓ Enter で選択
-- 対象と重み: title (10) > keywords (6) > MOC の scene (5) > note.scene (5) > headings (3) > commands.text / comment (2)
-- 部分一致（大文字小文字無視）。複数語はスペース区切りの AND
-- 結果: ノート名 + フォルダ + 一致した箇所の抜粋（一致語をハイライト）。見出し一致はその見出しへ、コマンド一致はそのノートへ
-- 左ナビ上の絞り込み欄は、ナビの木をテキストでフィルタ（title / scene / keywords）
+- `Ctrl+K` / `⌘K` / `/`（入力欄にフォーカスが無い時）で開く。`Esc` で閉じる。↑↓ Enter
+- 重み: title 10（先頭一致 +3）> keywords 6 > scene 5 > カテゴリ・グループ名 4 > 手順名 3 > コマンド本文・キャプション 2。複数語は AND
+- 結果行: ノート名（手順一致なら ` › 手順名`）、右にカテゴリ / グループ、下に抜粋（一致語を `<mark>`）。手順一致は `#/n/ID/SLUG` へ
 
-### 4.6 ノート画面
+### 4.6 その他
 
-- パンくず（`folder` を ` / ` で）、タイトル、`scene`、`keywords` チップ、`checked`（あれば）、`mtime`
-- 「Obsidian で開く」: `obsidian://open?vault=<meta.vault_name>&file=<encodeURIComponent(path から .md を除いたもの)>`
-- 「使う変数」: `note.placeholders` のうち `variables` か `extra` にあるものを、その場で編集できる小さな入力欄として並べる（上部バーと同じ状態を双方向に更新）。無いものは「追加」ボタン付きチップ
-- 目次: `headings` から（`h2` のみ。`h3` はインデント）。クリックでスクロール
-- 本文: `note.html` を `innerHTML` で描画 → 置換・コピー・タスク・wikilink クリックを有効化
-- タスク: `.task-box` の状態を `localStorage["cs.tasks.<id>"]` に保存。タスクを含むノートには「チェックをリセット」
-- 末尾: `backlinks`（「このノートへのリンク」）
-- `.wl` クリックは hash 遷移。`.wl-dead` はクリック不可
+- `cs.recent` に最近見たノート 8 件。`cs.tasks.<id>` にチェック状態
+- JS は 1 ファイル（`app.js`、`defer`。インライン化されても動くよう readyState を見る）。外部通信なし
+- モバイル（≤820px）: サイドバーはドロワー（☰）、変数は `変数 (n/14 入力済み)` ボタンで開閉、BROWSE はチップ列、横スクロールなし
+- `data.js` が無い時は「`python3 build.py` を実行してください」
 
-### 4.7 その他
-
-- 「最近見たノート」8 件を `localStorage["cs.recent"]` に保存しホームと左ナビ上部に出す
-- 左ナビのグループ開閉状態を `localStorage["cs.nav"]` に保存
-- `data.js` が読めていない時はホームに「`python3 build.py` を実行してください」と出す
-- JS は 1 ファイル（`app.js`）、`<script defer>` で読み込む。`index.html` は `data.js` → `app.js` の順。例外として、描画前にテーマ（`data-theme`）を当てる数行だけは `index.html` の `<head>` にインラインで置く（ちらつき防止）
-
-### 4.8 文言（日本語）
+### 4.7 文言（日本語）
 
 | 要素 | 文言 |
 |---|---|
-| 検索ボタン | 検索 (Ctrl+K) |
+| ナビ見出し | NAVIGATION（getSH と同じく英字のまま） |
+| 検索ボタン | 検索 (Ctrl K) |
 | 検索プレースホルダ | ノート名・検索語・コマンドで探す |
-| 変数バー見出し | 書き換える場所 |
 | 変数の有効チェック | 反映 |
-| その他の変数 | その他の変数 |
-| 変数を追加 | 変数を追加 |
-| クリア | すべてクリア |
-| 元に戻す | 元に戻す |
-| コピー | コピー / コピーしました / 未入力: … |
-| テーマ切替 | ダーク / ライト |
-| ノート内の変数 | このノートで使う変数 |
-| 目次 | 目次 |
+| その他の変数 / 追加 / クリア / 元に戻す | その他の変数 ▾ / 変数を追加… / すべてクリア / 元に戻す |
+| コピー | Copy（ターミナルのヘッダ）/ コピー（詳細内）/ コピーしました / 未入力: … |
+| 構文ブロック | 構文 — まずこれ |
+| 全開閉 | すべて閉じる / すべて開く |
+| 詳細 | 詳細 — 書き換える場所 / オプション / 出力例 / 詰まったら / 関連 |
+| コマンド無し | この手順にコマンドは無い（判断・確認のみ）。詳細で読む |
 | 被リンク | このノートへのリンク |
 | Obsidian | Obsidian で開く |
-| タスクリセット | チェックをリセット |
+| タスク | n/N 完了 / チェックをリセット |
 | 最近 | 最近見たノート |
-| 全ノート | 全ノート（フォルダ順） |
-| 外部 | 外部リファレンス |
 | 空検索 | 一致するノートがありません |
 
 

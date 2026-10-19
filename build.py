@@ -26,7 +26,7 @@ import sys
 import urllib.parse
 from pathlib import Path
 
-VERSION = "1.0"
+VERSION = "1.1"
 
 # ---------------------------------------------------------------------------
 # 正規表現
@@ -218,6 +218,11 @@ class Converter:
         self.links = []                       # 解決できた id（重複あり）
         self.commands = []                    # [{lang, comment, text}]
         self.task_counter = 0
+        self.sections = []                    # getSH 表示用: [{title, slug, lead, subs:[{title, slug, cmds:[{lang, caption, text}]}]}]
+        self.cur_sec = None
+        self.quote_depth = 0                  # コールアウト／引用の中では lead・cmds を拾わない
+        self.list_depth = 0
+        self.intro = ""                       # 最初の見出しより前の説明文
 
     # ---- ブロック ----------------------------------------------------------
     def convert(self, lines) -> str:
@@ -304,6 +309,13 @@ class Converter:
                     break
                 para.append(l)
                 j += 1
+            if self.quote_depth == 0 and self.list_depth == 0:
+                plain = strip_md(" ".join(x.strip() for x in para))[:220]
+                if self.cur_sec is not None:
+                    if not self.cur_sec["lead"] and not self.cur_sec.get("_seen_cmd"):
+                        self.cur_sec["lead"] = plain
+                elif not self.intro:
+                    self.intro = plain
             out.append("<p>" + self.inline("\n".join(x.strip() for x in para)) + "</p>")
             i = j
         return "\n".join(out)
@@ -388,7 +400,11 @@ class Converter:
             elif plain_rest:
                 body = self.inline("\n".join([first] + [x.strip() for x in rest]))
             else:
-                body = self.inline(first) + "\n" + self.parse_blocks(rest)
+                self.list_depth += 1
+                try:
+                    body = self.inline(first) + "\n" + self.parse_blocks(rest)
+                finally:
+                    self.list_depth -= 1
             parts.append(f"<li{cls}>{prefix}{body}</li>")
         parts.append(f"</{tag}>")
         return j, "\n".join(parts)
@@ -404,6 +420,12 @@ class Converter:
             k += 1
         self.slug_seen[slug] = True
         self.headings.append({"level": level, "text": plain, "slug": slug})
+        if self.quote_depth == 0:
+            if level <= 2:
+                self.cur_sec = {"title": plain, "slug": slug, "lead": "", "subs": [{"title": "", "slug": slug, "cmds": []}]}
+                self.sections.append(self.cur_sec)
+            elif self.cur_sec is not None:
+                self.cur_sec["subs"].append({"title": plain, "slug": slug, "cmds": []})
         cls = SECTION_CLASS.get(plain)
         cls_attr = f' class="{cls}"' if cls else ""
         return f'<h{level} id="{esc_attr(slug)}"{cls_attr}>{self.inline(raw)}</h{level}>'
@@ -440,6 +462,12 @@ class Converter:
         text = "\n".join(lines)
         if lang:
             self.commands.append({"lang": lang, "comment": caption or "", "text": text[:4000]})
+            if self.quote_depth == 0:
+                if self.cur_sec is None:
+                    self.cur_sec = {"title": "", "slug": "", "lead": "", "subs": [{"title": "", "slug": "", "cmds": []}]}
+                    self.sections.append(self.cur_sec)
+                self.cur_sec["_seen_cmd"] = True
+                self.cur_sec["subs"][-1]["cmds"].append({"lang": lang, "caption": caption or "", "text": text[:4000]})
         cls = "code" if lang else "code code-out"
         cap_html = f'<div class="code-cap">{self.inline(caption)}</div>' if caption else ""
         return f'<div class="{cls}" data-lang="{esc_attr(lang)}">{cap_html}<pre><code>{code_html}</code></pre></div>'
@@ -453,14 +481,22 @@ class Converter:
                 fold = m.group(2)
                 title = m.group(3).strip()
                 title_html = self.inline(title) if title else esc(CALLOUT_DEFAULT_TITLE.get(ctype, ctype))
-                body_html = self.parse_blocks(inner[idx + 1:])
+                self.quote_depth += 1
+                try:
+                    body_html = self.parse_blocks(inner[idx + 1:])
+                finally:
+                    self.quote_depth -= 1
                 if fold:
                     open_attr = " open" if fold == "+" else ""
                     return (f'<details class="callout callout-{esc_attr(ctype)}"{open_attr}><summary>{title_html}</summary>'
                             f'<div class="callout-body">{body_html}</div></details>')
                 return (f'<div class="callout callout-{esc_attr(ctype)}"><div class="callout-title">{title_html}</div>'
                         f'<div class="callout-body">{body_html}</div></div>')
-        return "<blockquote>" + self.parse_blocks(inner) + "</blockquote>"
+        self.quote_depth += 1
+        try:
+            return "<blockquote>" + self.parse_blocks(inner) + "</blockquote>"
+        finally:
+            self.quote_depth -= 1
 
     def render_table(self, header: str, sep: str, rows) -> str:
         heads = split_table_row(header)
@@ -865,6 +901,72 @@ def parse_moc(text: str):
 
 
 # ---------------------------------------------------------------------------
+# カテゴリ（getSH 風の左ナビ）: config.categories のフォルダ指定でノートを振り分ける
+# ---------------------------------------------------------------------------
+def build_categories(cfg: dict, notes: dict):
+    cats = cfg.get("categories", [])
+    if not cats:
+        return [], {}
+    assigned = {}
+    for c in cats:                                   # 1. ノート名での明示指定
+        for nid in c.get("notes", []):
+            if nid in notes:
+                assigned[nid] = c["id"]
+    for nid, n in notes.items():                     # 2. フォルダ完全一致
+        if nid in assigned:
+            continue
+        for c in cats:
+            if n["folder"] in c.get("folders", []):
+                assigned[nid] = c["id"]
+                break
+    for nid, n in notes.items():                     # 3. フォルダ前方一致（最長一致）
+        if nid in assigned:
+            continue
+        best, bestlen = None, -1
+        for c in cats:
+            for f in c.get("folders", []):
+                if n["folder"].startswith(f + "/") and len(f) > bestlen:
+                    best, bestlen = c["id"], len(f)
+        if best:
+            assigned[nid] = best
+    fallback = cfg.get("category_fallback", cats[-1]["id"])
+    for nid in notes:                                # 4. 残りは既定カテゴリ
+        assigned.setdefault(nid, fallback)
+
+    pb_order = cfg.get("vault", {}).get("playbook_order", [])
+    out = []
+    for c in cats:
+        ids = [nid for nid in notes if assigned[nid] == c["id"]]
+        merge = c.get("merge_same_basename", True)
+        groups, order = {}, {}
+        for nid in ids:
+            folder = notes[nid]["folder"]
+            parent = folder.split("/")[0]
+            base = folder.rsplit("/", 1)[-1] if "/" in folder else "概要"
+            key = base if merge else parent + "/" + base
+            title = base if merge else re.sub(r"^\d+\s+", "", parent) + " / " + base
+            if nid in c.get("notes", []):
+                key, title = "_explicit", "その他"
+            groups.setdefault(key, {"title": title, "notes": []})["notes"].append(nid)
+            idx, best = 999, -1
+            for i, f in enumerate(c.get("folders", [])):
+                if (folder == f or folder.startswith(f + "/")) and len(f) > best:
+                    idx, best = i, len(f)
+            if nid in c.get("notes", []):
+                idx = 998
+            order[key] = min(order.get(key, 999), idx)
+        glist = sorted(groups.items(), key=lambda kv: (order[kv[0]], natural_key(kv[1]["title"])))
+        for _, g in glist:
+            if c["id"] == "playbook":
+                g["notes"].sort(key=lambda x: (pb_order.index(x) if x in pb_order else 999, natural_key(x)))
+            else:
+                g["notes"].sort(key=natural_key)
+        out.append({"id": c["id"], "title": c["title"], "en": c.get("en", ""), "icon": c.get("icon", ""),
+                    "desc": c.get("desc", ""), "count": len(ids), "first": c.get("first"), "groups": [g for _, g in glist]})
+    return out, assigned
+
+
+# ---------------------------------------------------------------------------
 # ビルド本体
 # ---------------------------------------------------------------------------
 def build(cfg: dict, vault: Path, project: Path, out_dir: Path, check_only: bool, single: bool):
@@ -932,9 +1034,20 @@ def build(cfg: dict, vault: Path, project: Path, out_dir: Path, check_only: bool
         lost = fidelity_missing(body_lines, body_html)
         if lost:
             warnings.append((nid, "fidelity", "本文から消えた語の疑い: " + " ".join(lost)))
+        excluded = set(cfg.get("excluded_sections", ["書き換える場所", "その他のオプション", "詰まったら", "関連"]))
+        sections = []
+        for sec in conv.sections:
+            sec.pop("_seen_cmd", None)
+            if sec["title"] in excluded:
+                continue
+            sec["kind"] = "syntax" if sec["title"] == "構文" else "step"
+            sec["ncmd"] = sum(len(sub["cmds"]) for sub in sec["subs"])
+            sections.append(sec)
         notes[nid] = {
             "id": nid,
             "title": nid,
+            "intro": conv.intro,
+            "sections": sections,
             "folder": folder,
             "path": str(rel).replace(os.sep, "/"),
             "kind": kind,
@@ -1021,6 +1134,10 @@ def build(cfg: dict, vault: Path, project: Path, out_dir: Path, check_only: bool
         })
     nav.append({"id": "folder", "title": "フォルダ一覧", "desc": "Vault のフォルダ構成そのまま。MOC に載っていないノートもここに出る。", "sections": folder_sections})
 
+    categories, assigned = build_categories(cfg, notes)
+    for nid, cid in assigned.items():
+        notes[nid]["category"] = cid
+
     orphans = sorted([nid for nid in notes if nid not in moc_referenced], key=natural_key)
     for o in orphans:
         warnings.append((o, "orphan", "00 Cheatsheet MOC に載っていない"))
@@ -1038,6 +1155,7 @@ def build(cfg: dict, vault: Path, project: Path, out_dir: Path, check_only: bool
             "title": cfg["site"].get("title", "OSCP Cheatsheet"),
             "subtitle": cfg["site"].get("subtitle", ""),
             "short": cfg["site"].get("short", ""),
+            "tagline": cfg["site"].get("tagline", ""),
             "built_at": _dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
             "vault_name": cfg["vault"].get("name", vault.name),
             "note_count": len(notes),
@@ -1049,6 +1167,7 @@ def build(cfg: dict, vault: Path, project: Path, out_dir: Path, check_only: bool
         "placeholders": dict(sorted(ph_counts.items(), key=lambda kv: (-kv[1], kv[0]))),
         "notes": notes,
         "nav": nav,
+        "categories": categories,
         "external": external,
         "orphans": orphans,
     }
@@ -1065,12 +1184,20 @@ def build(cfg: dict, vault: Path, project: Path, out_dir: Path, check_only: bool
     (out_dir / "img").mkdir(exist_ok=True)
     js = "window.CHEATSHEET_DATA = " + json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/") + ";\n"
     (out_dir / "data.js").write_text(js, encoding="utf-8")
+    build_id = _dt.datetime.now().strftime("%Y%m%d%H%M%S")
     for name in ("index.html", "app.js", "style.css"):
         srcf = src_dir / name
-        if srcf.is_file():
-            shutil.copyfile(srcf, out_dir / name)
-        else:
+        if not srcf.is_file():
             warnings.append(("(src)", "src", f"src/{name} が無い（UI 未配置）"))
+            continue
+        if name == "index.html":
+            # 更新後に古い CSS / JS / data がキャッシュされないよう、アセット URL にビルド ID を付ける
+            page = srcf.read_text(encoding="utf-8")
+            for asset in ("style.css", "data.js", "app.js"):
+                page = page.replace(f'"{asset}"', f'"{asset}?v={build_id}"', 1)
+            (out_dir / name).write_text(page, encoding="utf-8")
+        else:
+            shutil.copyfile(srcf, out_dir / name)
     for name, p in used_images.items():
         shutil.copyfile(p, out_dir / "img" / name)
     (out_dir / ".nojekyll").write_text("", encoding="utf-8")

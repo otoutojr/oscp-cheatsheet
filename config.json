@@ -2,12 +2,19 @@
   "site": {
     "title": "OSCP Cheatsheet",
     "subtitle": "列挙 → 侵入 → 昇格 → ドメイン制圧。上の欄を埋めるとコマンドに反映される。",
-    "short": "oscp.sh"
+    "short": "oscp.sh",
+    "tagline": "列挙から root まで。"
   },
   "vault": {
     "path": "/home/kali/Offsec/Penetration",
     "name": "Penetration",
-    "folders": ["10 Exploit", "11 Linux", "12 Windows", "13 CVE", "14 Methodology"],
+    "folders": [
+      "10 Exploit",
+      "11 Linux",
+      "12 Windows",
+      "13 CVE",
+      "14 Methodology"
+    ],
     "moc": "00 Cheatsheet MOC.md",
     "pictures": "98 Picture",
     "playbook_order": [
@@ -29,25 +36,264 @@
     "single_file": "oscp-cheatsheet.html"
   },
   "variables": [
-    { "key": "ATTACKER_IP",   "label": "自分の IP（tun0）",        "group": "attacker", "example": "192.168.45.187", "default": "" },
-    { "key": "ATTACKER_PORT", "label": "待ち受けポート",            "group": "attacker", "example": "4444",           "default": "4444" },
-    { "key": "VICTIM_IP",     "label": "攻撃対象の IP",             "group": "victim",   "example": "192.168.50.8",   "default": "" },
-    { "key": "VICTIM_PORT",   "label": "対象サービスのポート",       "group": "victim",   "example": "80",             "default": "" },
-    { "key": "VICTIM_HOST",   "label": "対象のホスト名 / FQDN",     "group": "victim",   "example": "dc01.corp.com",  "default": "" },
-    { "key": "DOMAIN",        "label": "AD ドメイン",               "group": "victim",   "example": "corp.com",       "default": "" },
-    { "key": "BASE_DN",       "label": "ドメインの DN（DOMAIN から自動）", "group": "victim", "example": "DC=corp,DC=com", "default": "", "derive": "base_dn" },
-    { "key": "USER",          "label": "ユーザー名",                "group": "cred",     "example": "pete",           "default": "" },
-    { "key": "PASSWORD",      "label": "パスワード",                "group": "cred",     "example": "Nexus123!",      "default": "", "secret": true },
-    { "key": "HASH",          "label": "NT ハッシュ",               "group": "cred",     "example": "64f12cddaa88057e06a81b54e73b949b", "default": "", "secret": true },
-    { "key": "URL",           "label": "対象 URL",                  "group": "other",    "example": "http://192.168.50.8/", "default": "" },
-    { "key": "WORDLIST",      "label": "辞書ファイル",              "group": "other",    "example": "/usr/share/wordlists/rockyou.txt", "default": "/usr/share/wordlists/rockyou.txt" },
-    { "key": "FILE",          "label": "入力ファイル",              "group": "other",    "example": "users.txt",      "default": "" },
-    { "key": "OUTPUT",        "label": "出力先",                    "group": "other",    "example": "out",            "default": "" }
+    {
+      "key": "ATTACKER_IP",
+      "label": "自分の IP（tun0）",
+      "group": "attacker",
+      "example": "192.168.45.187",
+      "default": ""
+    },
+    {
+      "key": "ATTACKER_PORT",
+      "label": "待ち受けポート",
+      "group": "attacker",
+      "example": "4444",
+      "default": "4444"
+    },
+    {
+      "key": "VICTIM_IP",
+      "label": "攻撃対象の IP",
+      "group": "victim",
+      "example": "192.168.50.8",
+      "default": ""
+    },
+    {
+      "key": "VICTIM_PORT",
+      "label": "対象サービスのポート",
+      "group": "victim",
+      "example": "80",
+      "default": ""
+    },
+    {
+      "key": "VICTIM_HOST",
+      "label": "対象のホスト名 / FQDN",
+      "group": "victim",
+      "example": "dc01.corp.com",
+      "default": ""
+    },
+    {
+      "key": "DOMAIN",
+      "label": "AD ドメイン",
+      "group": "victim",
+      "example": "corp.com",
+      "default": ""
+    },
+    {
+      "key": "BASE_DN",
+      "label": "ドメインの DN（DOMAIN から自動）",
+      "group": "victim",
+      "example": "DC=corp,DC=com",
+      "default": "",
+      "derive": "base_dn"
+    },
+    {
+      "key": "USER",
+      "label": "ユーザー名",
+      "group": "cred",
+      "example": "pete",
+      "default": ""
+    },
+    {
+      "key": "PASSWORD",
+      "label": "パスワード",
+      "group": "cred",
+      "example": "Nexus123!",
+      "default": "",
+      "secret": true
+    },
+    {
+      "key": "HASH",
+      "label": "NT ハッシュ",
+      "group": "cred",
+      "example": "64f12cddaa88057e06a81b54e73b949b",
+      "default": "",
+      "secret": true
+    },
+    {
+      "key": "URL",
+      "label": "対象 URL",
+      "group": "other",
+      "example": "http://192.168.50.8/",
+      "default": ""
+    },
+    {
+      "key": "WORDLIST",
+      "label": "辞書ファイル",
+      "group": "other",
+      "example": "/usr/share/wordlists/rockyou.txt",
+      "default": "/usr/share/wordlists/rockyou.txt"
+    },
+    {
+      "key": "FILE",
+      "label": "入力ファイル",
+      "group": "other",
+      "example": "users.txt",
+      "default": ""
+    },
+    {
+      "key": "OUTPUT",
+      "label": "出力先",
+      "group": "other",
+      "example": "out",
+      "default": ""
+    }
   ],
   "variable_groups": {
     "attacker": "攻撃側（Kali）",
-    "victim":   "攻撃対象",
-    "cred":     "資格情報",
-    "other":    "その他"
-  }
+    "victim": "攻撃対象",
+    "cred": "資格情報",
+    "other": "その他"
+  },
+  "categories": [
+    {
+      "id": "scan",
+      "title": "スキャン",
+      "en": "Scan",
+      "icon": ">_",
+      "desc": "ポートとサービスの洗い出し、公開 exploit の検索。手を動かす前にここを終える。",
+      "folders": [
+        "10 Exploit/Enumeration"
+      ],
+      "notes": [],
+      "first": "nmap"
+    },
+    {
+      "id": "services",
+      "title": "主要サービス",
+      "en": "Common services",
+      "icon": "◉",
+      "desc": "開いていたポートから引く。FTP / SSH / SMTP / DNS / SNMP / SMB / RDP / WinRM / DB。",
+      "folders": [
+        "10 Exploit/21 - ftp",
+        "10 Exploit/22 - ssh",
+        "11 Linux/22 - ssh",
+        "10 Exploit/25 - smtp",
+        "10 Exploit/53 - domain",
+        "10 Exploit/110,143 - pop3,imap",
+        "10 Exploit/161 - snmp",
+        "12 Windows/445 - smb",
+        "10 Exploit/500 - IKE",
+        "12 Windows/1433 - ms-sql-s",
+        "12 Windows/1978 - WiFi Mouse",
+        "10 Exploit/3000 - gitea",
+        "10 Exploit/3306 - mysql",
+        "12 Windows/3389 - ms-wbt-server",
+        "10 Exploit/5432 - postgresql",
+        "12 Windows/5985 - winrm",
+        "12 Windows/6600 - wac"
+      ],
+      "notes": []
+    },
+    {
+      "id": "web",
+      "title": "Web",
+      "en": "Web",
+      "icon": "◈",
+      "desc": "80/443 の列挙から入口の確保まで。ディレクトリ探索、LFI / RFI、アップロード、XSS、SQLi、管理画面。",
+      "folders": [
+        "10 Exploit/80,443 - http,https",
+        "10 Exploit/8080 - http-proxy",
+        "10 Exploit/8888 - marimo",
+        "10 Exploit/SQL Injection"
+      ],
+      "notes": [],
+      "first": "Web enumeration"
+    },
+    {
+      "id": "shell",
+      "title": "シェルと転送",
+      "en": "Shells & transfer",
+      "icon": "⚡",
+      "desc": "リバースシェルを取って安定させ、ファイルを運び、内部ネットワークへ抜ける。",
+      "folders": [
+        "10 Exploit/Reverse Shell",
+        "11 Linux/Reverse Shell",
+        "12 Windows/Reverse Shell",
+        "10 Exploit/File Transfer",
+        "10 Exploit/Tunneling",
+        "10 Exploit/Client-side Attacks",
+        "12 Windows/C2"
+      ],
+      "notes": [],
+      "first": "reverse shell oneliners"
+    },
+    {
+      "id": "privesc",
+      "title": "権限昇格",
+      "en": "Privesc",
+      "icon": "↑",
+      "desc": "入った直後の列挙から root / SYSTEM まで。Linux と Windows。",
+      "folders": [
+        "11 Linux/Enumeration",
+        "11 Linux/Privesc",
+        "12 Windows/Enumeration",
+        "12 Windows/Privesc"
+      ],
+      "notes": [],
+      "merge_same_basename": false,
+      "first": "linpeas"
+    },
+    {
+      "id": "ad",
+      "title": "Active Directory",
+      "en": "Active directory",
+      "icon": "◆",
+      "desc": "ユーザー・グループ・ACL・チケットを辿ってドメイン制圧まで。",
+      "folders": [
+        "12 Windows",
+        "12 Windows/88 - kerberos",
+        "12 Windows/389 - ldap",
+        "12 Windows/BloodHound",
+        "12 Windows/SharpHound",
+        "12 Windows/Credential",
+        "12 Windows/Lateral Movement",
+        "12 Windows/cross-forest"
+      ],
+      "notes": []
+    },
+    {
+      "id": "tools",
+      "title": "便利ツール",
+      "en": "Useful stuff",
+      "icon": "✦",
+      "desc": "パスワード解析、辞書作成、出力の絞り込み、環境差の吸収。",
+      "folders": [
+        "10 Exploit/Credential Crack"
+      ],
+      "notes": [
+        "grep",
+        "Tool Portability"
+      ],
+      "first": "hashcat"
+    },
+    {
+      "id": "cve",
+      "title": "CVE",
+      "en": "CVE",
+      "icon": "☣",
+      "desc": "バージョンが確定した後に引く。影響版の判定 → 取得 → 実行 → 証跡。",
+      "folders": [
+        "13 CVE"
+      ],
+      "notes": []
+    },
+    {
+      "id": "playbook",
+      "title": "プレイブック",
+      "en": "Methodology",
+      "icon": "☰",
+      "desc": "列挙の道順とチェックリスト。迷ったらここに戻る。",
+      "folders": [
+        "14 Methodology"
+      ],
+      "notes": []
+    }
+  ],
+  "category_fallback": "tools",
+  "excluded_sections": [
+    "書き換える場所",
+    "その他のオプション",
+    "詰まったら",
+    "関連"
+  ]
 }

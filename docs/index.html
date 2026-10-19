@@ -3,89 +3,66 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="dark light">
+<meta name="color-scheme" content="dark">
 <title>OSCP Cheatsheet</title>
-<link rel="stylesheet" href="style.css">
-<script>
-// テーマの初期値だけ先に当てる（描画前のちらつき防止）。本体は app.js。
-(function () {
-  var t = null;
-  try { t = localStorage.getItem("cs.theme"); } catch (e) {}
-  if (t !== "light" && t !== "dark") {
-    t = (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) ? "light" : "dark";
-  }
-  document.documentElement.setAttribute("data-theme", t);
-})();
-</script>
+<link rel="stylesheet" href="style.css?v=20261019201526">
 </head>
 <body>
 
-<header id="top">
-  <div class="hdr-row">
-    <button id="nav-toggle" class="icon-btn" type="button" title="ナビを開く" aria-label="ナビを開く" aria-controls="nav" aria-expanded="false">☰</button>
-    <a class="brand" href="#/" title="ホーム"><span class="brand-short">oscp.sh</span></a>
-    <button id="vars-toggle" class="btn" type="button" aria-controls="varbar" aria-expanded="false">変数 (0/0 入力済み)</button>
-    <div class="hdr-spacer"></div>
-    <button class="btn search-btn" type="button" title="検索 (Ctrl+K)"><span class="k">🔍</span><span class="t">検索 (Ctrl+K)</span></button>
-    <button class="btn theme-btn" type="button" title="テーマ切替" aria-label="テーマ切替">☀ ライト</button>
-  </div>
-
-  <div id="varbar" aria-label="書き換える場所">
-    <div class="vb-main">
-      <span class="vb-title" title="ここを埋めると全ノートのコマンドに反映される">書き換える場所</span>
-      <div id="vb-primary" class="vb-chips"></div>
-      <button id="vb-more" class="btn btn-sm" type="button" aria-expanded="false" aria-controls="vb-other">その他の変数 ▾</button>
-      <select id="vb-add" class="sel-sm" title="ノート内に現れる &lt;X&gt; を入力欄に追加する"><option value="">変数を追加…</option></select>
-      <button id="vb-clear" class="btn btn-sm" type="button">すべてクリア</button>
-      <button id="vb-undo" class="btn btn-sm" type="button" hidden>元に戻す</button>
-    </div>
-    <div id="vb-other" class="vb-other" hidden>
-      <div id="vb-other-chips" class="vb-chips"></div>
-      <div class="vb-actions">
-        <label class="vb-opt" title="OFF にすると文中のインラインコード内の &lt;X&gt; は置換しない"><input type="checkbox" id="vb-inline" checked> インラインにも反映</label>
-      </div>
-    </div>
-  </div>
-</header>
-
-<div id="layout">
-  <aside id="nav" aria-label="ナビゲーション">
-    <div class="nav-brand">
-      <a class="brand" href="#/" title="ホーム"><span class="brand-short">oscp.sh</span></a>
-      <button class="btn search-btn" type="button" title="検索 (Ctrl+K)"><span class="t">検索 (Ctrl+K)</span></button>
-      <button class="btn theme-btn" type="button" title="テーマ切替" aria-label="テーマ切替">☀</button>
-    </div>
-    <div class="nav-head">
-      <input id="nav-filter" type="search" placeholder="ナビを絞り込む" autocomplete="off" spellcheck="false" aria-label="ナビを絞り込む">
-    </div>
-    <div id="nav-recent" class="nav-recent" hidden>
-      <div class="nav-sub">最近見たノート</div>
-      <ul id="nav-recent-list"></ul>
-    </div>
-    <nav id="nav-tree"></nav>
-    <div class="nav-foot">
-      <a href="#/all">全ノート（フォルダ順）</a>
-      <a href="#/ext">外部リファレンス</a>
-      <span id="nav-meta" class="muted"></span>
+<div class="shell">
+  <aside class="sidebar" id="sidebar" aria-label="ナビゲーション">
+    <a class="brand" href="#/" title="ホーム">
+      <span class="dots"><i></i><i></i><i></i></span>
+      <span class="brand-text"><small>OSCP</small><strong id="brand-name">oscp.sh</strong></span>
+    </a>
+    <div class="nav-label">NAVIGATION</div>
+    <nav class="nav" id="nav"></nav>
+    <div class="sidebar-foot">
+      <span class="pill"><i class="dot"></i>READY</span>
+      <span class="side-meta" id="side-meta"></span>
     </div>
   </aside>
-  <div id="backdrop" hidden></div>
-  <main id="main" tabindex="-1"></main>
+  <div class="backdrop" id="backdrop" hidden></div>
+
+  <div class="main">
+    <header class="topbar" id="topbar">
+      <div class="topbar-left">
+        <button class="icon-btn menu-btn" id="menu-btn" type="button" aria-label="ナビを開く" aria-controls="sidebar" aria-expanded="false">☰</button>
+        <div class="workspace"><span class="ws-label">WORKSPACE</span><b id="ws-value">/</b></div>
+        <button class="vars-summary" id="vars-summary" type="button" title="クリックで変数欄を開く"></button>
+        <button class="vars-toggle" id="vars-toggle" type="button" aria-expanded="false">変数</button>
+      </div>
+      <div class="vars-wrap" id="vars-wrap">
+        <div class="vars" id="vars"></div>
+        <div class="vars-extra" id="vars-extra" hidden></div>
+      </div>
+      <div class="topbar-right">
+        <button class="qs" id="quick-search" type="button" title="検索 (Ctrl+K)"><span class="k">⌕</span><span>検索</span><kbd>Ctrl K</kbd></button>
+        <div class="topbar-btns">
+          <button class="btn-ghost" id="vars-more" type="button" aria-expanded="false">その他の変数 ▾</button>
+          <button class="btn-ghost" id="vars-clear" type="button">すべてクリア</button>
+          <button class="btn-ghost" id="vars-undo" type="button" hidden>元に戻す</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="content" id="content" tabindex="-1"></main>
+
+    <footer class="foot"><span id="foot-left">OSCP.SH</span><span>ENUMERATE // EXPLOIT // ESCALATE</span></footer>
+  </div>
 </div>
 
-<div id="palette" class="palette" hidden role="dialog" aria-modal="true" aria-label="検索">
-  <div class="pal-box">
-    <div class="pal-head">
-      <input id="pal-input" type="text" placeholder="ノート名・検索語・コマンドで探す" autocomplete="off" spellcheck="false" aria-label="検索">
-      <span class="pal-hint">↑↓ 移動 · Enter 開く · Esc 閉じる</span>
-    </div>
+<div class="palette" id="palette" hidden role="dialog" aria-modal="true" aria-label="検索">
+  <div class="pal">
+    <input id="pal-input" type="text" placeholder="ノート名・検索語・コマンドで探す" autocomplete="off" spellcheck="false" aria-label="検索">
     <ul id="pal-list" class="pal-list" role="listbox"></ul>
+    <div class="pal-hint">↑↓ 移動 · Enter 開く · Esc 閉じる</div>
   </div>
 </div>
 
 <div id="toast" class="toast" hidden role="status" aria-live="polite"></div>
 
-<script src="data.js" charset="utf-8"></script>
-<script src="app.js" defer></script>
+<script src="data.js?v=20261019201526" charset="utf-8"></script>
+<script src="app.js?v=20261019201526" defer></script>
 </body>
 </html>

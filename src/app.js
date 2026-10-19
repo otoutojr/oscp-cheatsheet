@@ -1,66 +1,48 @@
-/* OSCP Cheatsheet — app.js（案 A: 試験本番の速さ最優先）
-   素の JavaScript（classic script）。data.js の window.CHEATSHEET_DATA を読み、
-   ルータ → 変数 → ノート描画 → ナビ → 検索 → ホーム/一覧 の順に組み立てる。 */
+/* OSCP Cheatsheet — getSH 風 UI（素の JS、外部通信なし、file:// で動く） */
 (function () {
   "use strict";
 
-  var LS = {
-    vars: "cs.vars.v1",
-    tasks: "cs.tasks.",
-    recent: "cs.recent",
-    nav: "cs.nav",
-    theme: "cs.theme",
-    ui: "cs.ui.v1"
-  };
-  var SITE = "OSCP Cheatsheet";
-  var D = null;          // window.CHEATSHEET_DATA
-  var $ = function (sel, root) { return (root || document).querySelector(sel); };
-  var $$ = function (sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
-
-  // ---------------------------------------------------------------- utils
-  function lsGet(key, def) {
-    try {
-      var v = localStorage.getItem(key);
-      return v === null ? def : JSON.parse(v);
-    } catch (e) { return def; }
+  var D = window.CHEATSHEET_DATA;
+  if (!D || !D.notes) {
+    var showErr = function () {
+      var c = document.getElementById("content");
+      if (c) c.innerHTML = '<h1 class="page-title">data.js が読めません</h1><p class="page-desc">プロジェクトのディレクトリで <code>python3 build.py</code> を実行してから開いてください。</p>';
+    };
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", showErr); else showErr();
+    return;
   }
-  function lsSet(key, val) {
-    try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) { /* 容量超過などは無視 */ }
-  }
-  function lsDel(key) { try { localStorage.removeItem(key); } catch (e) { /* ignore */ } }
+  var LS = { vars: "cs.vars.v1", recent: "cs.recent" };
 
-  // DOM ビルダ。文字列は必ず textNode（innerHTML には入れない）
-  function el(tag, attrs) {
-    var node = document.createElement(tag);
+  // ------------------------------------------------------------ 小道具
+  function $(s, r) { return (r || document).querySelector(s); }
+  function $$(s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); }
+  function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+  function enc(s) { return encodeURIComponent(s); }
+  function lsGet(k, d) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* private mode など */ } }
+  function el(tag, attrs, children) {
+    var e = document.createElement(tag);
     if (attrs) {
       Object.keys(attrs).forEach(function (k) {
         var v = attrs[k];
         if (v === null || v === undefined || v === false) return;
-        if (k === "class") node.className = v;
-        else if (k === "text") node.textContent = v;
-        else if (k === "dataset") Object.keys(v).forEach(function (dk) { node.dataset[dk] = v[dk]; });
-        else if (k === "on") Object.keys(v).forEach(function (ev) { node.addEventListener(ev, v[ev]); });
-        else if (k === "checked" || k === "hidden" || k === "disabled" || k === "open") node[k] = !!v;
-        else if (k === "value") node.value = v;
-        else node.setAttribute(k, v);
+        if (k === "text") e.textContent = v;
+        else if (k === "html") e.innerHTML = v;
+        else if (k === "class") e.className = v;
+        else if (k.slice(0, 2) === "on") e.addEventListener(k.slice(2), v);
+        else if (k === "dataset") Object.keys(v).forEach(function (d) { e.dataset[d] = v[d]; });
+        else e.setAttribute(k, v === true ? "" : v);
       });
     }
-    for (var i = 2; i < arguments.length; i++) append(node, arguments[i]);
-    return node;
+    (children || []).forEach(function (c) { if (c === null || c === undefined) return; e.appendChild(typeof c === "string" ? document.createTextNode(c) : c); });
+    return e;
   }
-  function append(node, child) {
-    if (child === null || child === undefined || child === false) return;
-    if (Array.isArray(child)) { child.forEach(function (c) { append(node, c); }); return; }
-    if (typeof child === "string" || typeof child === "number") node.appendChild(document.createTextNode(String(child)));
-    else node.appendChild(child);
+  function chevSvg(cls) {
+    var w = document.createElement("span");
+    w.innerHTML = '<svg class="' + (cls || "chev") + '" viewBox="0 -960 960 960" aria-hidden="true" focusable="false" width="18" height="18"><path fill="currentColor" d="M480-345 240-585l56-56 184 184 184-184 56 56-240 240Z"/></svg>';
+    return w.firstChild;
   }
-  function enc(s) { return encodeURIComponent(s); }
-  function dec(s) { try { return decodeURIComponent(s); } catch (e) { return s; } }
-  function noteHref(id, slug) { return "#/n/" + enc(id) + (slug ? "/" + enc(slug) : ""); }
-  function secHref(g, s) { return "#/s/" + enc(g) + "/" + enc(s); }
-  function noteTitle(id) { return (D && D.notes[id]) ? D.notes[id].title : id; }
-  function uniq(arr) { var seen = {}; return arr.filter(function (x) { if (seen[x]) return false; seen[x] = true; return true; }); }
-
+  function dotsEl() { return el("span", { class: "dots" }, [el("i"), el("i"), el("i")]); }
   var toastTimer = null;
   function toast(msg, warn) {
     var t = $("#toast");
@@ -68,1185 +50,665 @@
     t.className = "toast" + (warn ? " warn" : "");
     t.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { t.hidden = true; }, warn ? 2600 : 1600);
+    toastTimer = setTimeout(function () { t.hidden = true; }, warn ? 3200 : 1600);
   }
 
-  function updateTopH() {
-    var top = $("#top");
-    if (top) document.documentElement.style.setProperty("--top-h", top.offsetHeight + "px");
-  }
+  // ------------------------------------------------------------ データの索引
+  var NOTES = D.notes;
+  var CATS = D.categories || [];
+  var CAT_BY_ID = {};
+  CATS.forEach(function (c) { CAT_BY_ID[c.id] = c; });
+  var NOTE_GROUP = {};   // note id → {cat, group}
+  CATS.forEach(function (c) { c.groups.forEach(function (g) { g.notes.forEach(function (id) { NOTE_GROUP[id] = { cat: c, group: g }; }); }); });
 
-  // ---------------------------------------------------------------- theme
-  function currentTheme() { return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark"; }
-  function setTheme(t, save) {
-    document.documentElement.setAttribute("data-theme", t);
-    if (save) lsSet(LS.theme, t);
-    $$(".theme-btn").forEach(function (b) {
-      var full = !b.closest(".nav-brand");
-      b.textContent = "";
-      b.appendChild(document.createTextNode(t === "dark" ? "☀" : "☾"));
-      if (full) b.appendChild(el("span", { class: "t", text: " " + (t === "dark" ? "ライト" : "ダーク") }));
-      b.title = t === "dark" ? "ライトに切替" : "ダークに切替";
-      b.setAttribute("aria-label", b.title);
+  function noteHref(id, slug) { return "#/n/" + enc(id) + (slug ? "/" + enc(slug) : ""); }
+  function catHref(id) { return "#/c/" + id; }
+  function catSlug(c) { return (c.en || c.id).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""); }
+
+  // ------------------------------------------------------------ 変数
+  var VARS = D.variables || [];
+  var VKEYS = VARS.map(function (v) { return v.key; });
+  var PRIMARY = ["ATTACKER_IP", "ATTACKER_PORT", "VICTIM_IP", "VICTIM_PORT", "DOMAIN", "USER"].filter(function (k) { return VKEYS.indexOf(k) >= 0; });
+  function isObj(o) { return !!o && typeof o === "object" && !Array.isArray(o); }
+  function lsArr(k) { var v = lsGet(k, []); return Array.isArray(v) ? v : []; }
+  var V = lsGet(LS.vars, null);
+  if (!isObj(V)) V = { values: {}, enabled: {}, extra: [], inlineApply: true };
+  if (!isObj(V.values)) V.values = {};
+  if (!isObj(V.enabled)) V.enabled = {};
+  if (!Array.isArray(V.extra)) V.extra = [];
+  if (V.inlineApply === undefined) V.inlineApply = true;
+  VARS.forEach(function (v) {
+    if (V.values[v.key] === undefined) V.values[v.key] = v["default"] || "";
+    if (V.enabled[v.key] === undefined) V.enabled[v.key] = true;
+  });
+  var UI = { extraOpen: false };   // 「その他の変数」の開閉は保存しない（上部バーが膨らんだままにならないように）
+  var UNDO = null;
+
+  function varDef(key) { for (var i = 0; i < VARS.length; i++) if (VARS[i].key === key) return VARS[i]; return null; }
+  function allKeys() { return VKEYS.concat(V.extra.filter(function (k) { return VKEYS.indexOf(k) < 0; })); }
+  function deriveBaseDn(domain) { return domain.split(".").filter(Boolean).map(function (p) { return "DC=" + p; }).join(","); }
+  function derivedValue(key) {
+    var d = varDef(key);
+    if (d && d.derive === "base_dn" && V.values.DOMAIN) return deriveBaseDn(V.values.DOMAIN.trim());
+    return "";
+  }
+  function valueOf(key) { return (V.values[key] || "").trim() || derivedValue(key); }
+  function isOn(key) { return V.enabled[key] !== false; }
+  function active(key) { return !!valueOf(key) && isOn(key); }
+  function saveVars() { lsSet(LS.vars, V); }
+  function labelOf(key) { return key.replace(/_/g, " "); }
+
+  function substitute(text) {
+    return text.replace(/<([A-Z][A-Z0-9_]*)>/g, function (m, k) { return active(k) ? valueOf(k) : m; });
+  }
+  function unfilled(text) {
+    var out = [];
+    text.replace(/<([A-Z][A-Z0-9_]*)>/g, function (m, k) { if (!active(k) && out.indexOf(k) < 0) out.push(k); return m; });
+    return out;
+  }
+  function phHtml(text) {
+    return esc(text).replace(/&lt;([A-Z][A-Z0-9_]*)&gt;/g, function (m, k) { return '<span class="ph" data-ph="' + k + '">&lt;' + k + '&gt;</span>'; });
+  }
+  // キャプション（# コメント）: プレースホルダ + [[wikilink]] + `code`
+  function captionHtml(text) {
+    var h = phHtml(text);
+    h = h.replace(/\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]+))?\]\]/g, function (m, note, alias) {
+      var id = note.trim();
+      var label = alias ? alias.trim() : id;
+      if (NOTES[id]) return '<a href="' + noteHref(id) + '">' + esc(label) + "</a>";
+      return esc(label);
     });
-  }
-  function initTheme() {
-    var saved = lsGet(LS.theme, null);
-    var t = (saved === "light" || saved === "dark") ? saved
-      : ((window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) ? "light" : "dark");
-    setTheme(t, false);
-    $$(".theme-btn").forEach(function (b) { b.addEventListener("click", function () { setTheme(currentTheme() === "dark" ? "light" : "dark", true); }); });
+    h = h.replace(/`([^`]+)`/g, "<code>$1</code>");
+    return h;
   }
 
-  // ---------------------------------------------------------------- variables
-  var V = {
-    defs: [],            // D.variables
-    byKey: {},
-    state: { values: {}, enabled: {}, extra: [], inlineApply: true },
-    undo: null,
-    masked: {},          // secret の伏せ字状態（セッション内）
-    groups: ["attacker", "victim", "cred", "other"]
-  };
-
-  function loadVars() {
-    V.defs = D.variables || [];
-    V.byKey = {};
-    V.defs.forEach(function (d) { V.byKey[d.key] = d; });
-    var saved = lsGet(LS.vars, null) || {};
-    var sv = saved.values || {}, se = saved.enabled || {};
-    var st = { values: {}, enabled: {}, extra: [], inlineApply: saved.inlineApply !== false };
-    V.defs.forEach(function (d) {
-      st.values[d.key] = (typeof sv[d.key] === "string") ? sv[d.key] : (d.default || "");
-      st.enabled[d.key] = se[d.key] !== false;
-    });
-    (Array.isArray(saved.extra) ? saved.extra : []).forEach(function (k) {
-      if (typeof k !== "string" || V.byKey[k] || st.extra.indexOf(k) >= 0) return;
-      st.extra.push(k);
-      st.values[k] = (typeof sv[k] === "string") ? sv[k] : "";
-      st.enabled[k] = se[k] !== false;
-    });
-    V.state = st;
-    V.defs.forEach(function (d) { if (d.secret) V.masked[d.key] = false; });
-  }
-  function saveVars() { lsSet(LS.vars, V.state); }
-  function allKeys() { return V.defs.map(function (d) { return d.key; }).concat(V.state.extra); }
-  function isKnownKey(k) { return !!V.byKey[k] || V.state.extra.indexOf(k) >= 0; }
-  function isOn(k) { return V.state.enabled[k] !== false; }
-  function deriveBaseDn(domain) {
-    var parts = String(domain || "").trim().split(".").filter(Boolean);
-    return parts.length ? parts.map(function (p) { return "DC=" + p; }).join(",") : "";
-  }
-  // 有効値。derive: base_dn は未入力時のみ DOMAIN から導出
-  function effVal(k) {
-    var v = V.state.values[k];
-    if (typeof v !== "string") v = "";
-    var d = V.byKey[k];
-    if (v === "" && d && d.derive === "base_dn") {
-      var dn = deriveBaseDn(V.state.values.DOMAIN);
-      if (dn) return { v: dn, derived: true };
-    }
-    return { v: v, derived: false };
-  }
-  function isFilled(k) { return isOn(k) && effVal(k).v !== ""; }
-  // config の default と同じ値のまま（= 自分では何も入れていない）
-  function isDefaultVal(k) {
-    var d = V.byKey[k];
-    return !!d && (d.default || "") !== "" && (V.state.values[k] || "") === d.default;
-  }
-  // 「n/total 入力済み」は default のままのものを数えない
-  function filledCount() {
-    var keys = allKeys(), n = 0;
-    keys.forEach(function (k) { if (isFilled(k) && !isDefaultVal(k)) n++; });
-    return { n: n, total: keys.length };
-  }
-
-  // §4.3「インラインコード（<code> 直下）」= pre の外の code。.code-cap や本文テキストは inline ではない
-  function isInlinePh(ph) {
-    var code = ph.closest("code");
-    return !!code && !code.closest("pre");
-  }
-  // root 以下の .ph を現在の状態で書き換える。
-  // .ph-key（「書き換える場所」表の 1 列目）は対応表なので <KEY> の表示を保ち、class だけ切り替える
-  function applyPh(root) {
-    if (!root) return;
-    var inlineOk = V.state.inlineApply;
-    var phs = root.querySelectorAll(".ph");
-    for (var i = 0; i < phs.length; i++) {
-      var ph = phs[i], k = ph.dataset.ph;
-      if (!k) continue;
-      var e = effVal(k), on = isOn(k);
-      var inline = isInlinePh(ph);
-      var isKey = ph.classList.contains("ph-key");
-      var cls, text = "<" + k + ">", title;
-      if (on && e.v !== "" && (inlineOk || !inline)) {
-        cls = "ph ph-set";
-        if (!isKey) text = e.v;
-        title = (isKey ? "入力済み: " + e.v : "<" + k + ">") + (e.derived ? "（DOMAIN から自動）" : "");
-      } else if (inline && !inlineOk && e.v !== "" && on) {
-        cls = "ph ph-unset ph-off";
-        title = "インラインには反映しない設定";
+  function applyVars(root) {
+    $$(".ph", root || document).forEach(function (s) {
+      var k = s.dataset.ph;
+      var inlineOff = !V.inlineApply && s.closest(".note-body") && s.closest("code") && !s.closest("pre");
+      if (active(k) && !inlineOff) {
+        s.textContent = valueOf(k);
+        s.className = "ph ph-set";
+        s.title = "<" + k + ">";
       } else {
-        cls = "ph ph-unset";
-        title = on ? "未入力: 上の欄に入れると置き換わる" : "反映オフ";
+        s.textContent = "<" + k + ">";
+        s.className = "ph ph-unset";
+        var d = varDef(k);
+        s.title = d ? d.label : k + "（上の「その他の変数」から追加できる）";
       }
-      if (isKey) cls += " ph-key";
-      if (ph.textContent !== text) ph.textContent = text;
-      if (ph.className !== cls) ph.className = cls;
-      if (ph.title !== title) ph.title = title;
-    }
-  }
-  function applyAll() {
-    applyPh($("#main"));
-    refreshVarChips();
-    updateVarsToggle();
+    });
+    syncVarCards();
   }
 
-  function updateVarsToggle() {
-    var c = filledCount();
-    var b = $("#vars-toggle");
-    if (b) b.textContent = "変数 (" + c.n + "/" + c.total + " 入力済み)";
+  function varCard(key, removable) {
+    var d = varDef(key) || { key: key, label: key, example: "" };
+    var card = el("div", { class: "var", dataset: { key: key } });
+    var apply = el("input", { type: "checkbox", title: key + " を反映する" });
+    apply.checked = isOn(key);
+    apply.addEventListener("change", function () { V.enabled[key] = apply.checked; saveVars(); applyVars(); });
+    var top = el("div", { class: "var-top" }, [
+      el("span", { class: "var-key", text: labelOf(key), title: d.label || key }),
+      el("label", { class: "var-apply" }, [apply, "反映"]),
+    ]);
+    var inp = el("input", { type: "text", placeholder: d.example || "", autocomplete: "off", spellcheck: "false", "aria-label": d.label || key });
+    inp.value = V.values[key] || "";
+    inp.addEventListener("input", function () { V.values[key] = inp.value; saveVars(); applyVars(); });
+    var row = el("div", { class: "var-row" }, [inp]);
+    if (removable) {
+      row.appendChild(el("button", { class: "rm", type: "button", title: "この変数を外す", text: "×", onclick: function () {
+        V.extra = V.extra.filter(function (x) { return x !== key; }); delete V.values[key]; saveVars(); renderVars(); applyVars();
+      } }));
+    }
+    card.appendChild(top); card.appendChild(row);
+    return card;
   }
 
-  // 変数チップ 1 つ。compact=true はノート内「このノートで使う変数」用
-  function makeVarChip(k, opts) {
-    opts = opts || {};
-    var d = V.byKey[k];
-    var isExtra = !d;
-    var chip = el("div", { class: "var", dataset: { key: k, group: d ? d.group : "extra" } });
-    var on = el("input", { type: "checkbox", class: "var-on", title: "反映", "aria-label": k + " を反映", checked: isOn(k) });
-    on.addEventListener("change", function () {
-      V.state.enabled[k] = on.checked;
-      saveVars();
-      applyAll();
-    });
-    var label = d ? (d.label + (d.example ? "（例: " + d.example + "）" : "")) : ("<" + k + ">（ノート内の穴埋め）");
-    var key = el("span", { class: "var-key", text: k, title: label });
-    chip.appendChild(on);
-    chip.appendChild(key);
-    if (d && d.secret) {
-      var eye = el("button", { type: "button", class: "var-eye", title: "伏せ字にする / 見せる", "aria-label": k + " を伏せ字にする", text: V.masked[k] ? "●" : "👁" });
-      eye.addEventListener("click", function () {
-        V.masked[k] = !V.masked[k];
-        $$('.var[data-key="' + CSS.escape(k) + '"]').forEach(function (c) {
-          var i = $(".var-in", c), e2 = $(".var-eye", c);
-          if (i) i.type = V.masked[k] ? "password" : "text";
-          if (e2) e2.textContent = V.masked[k] ? "●" : "👁";
-        });
-      });
-      chip.appendChild(eye);
-    } else if (isExtra && !opts.compact) {
-      var x = el("button", { type: "button", class: "var-x", title: "この変数を外す", "aria-label": k + " を外す", text: "✕" });
-      x.addEventListener("click", function () { removeExtra(k); });
-      chip.appendChild(x);
-    }
-    if (d && (d.example || "").length > 20) chip.classList.add("var-wide");
-    var e = effVal(k);
-    var inp = el("input", {
-      type: (d && d.secret && V.masked[k]) ? "password" : "text",
-      class: "var-in" + (e.derived ? " derived" : ""),
-      value: V.state.values[k] || "",
-      placeholder: e.derived ? e.v : (d ? d.example : "<" + k + ">"),
-      autocomplete: "off", spellcheck: "false", autocapitalize: "off",
-      "aria-label": d ? d.label : k
-    });
-    inp.addEventListener("input", function () {
-      V.state.values[k] = inp.value;
-      saveVars();
-      syncInputs(k, inp);
-      applyAll();
-    });
-    inp.addEventListener("keydown", function (ev) {
-      if (ev.key === "Escape") { inp.blur(); ev.stopPropagation(); }
-      if (ev.key === "Enter") { inp.blur(); }
-    });
-    chip.appendChild(inp);
-    refreshChip(chip);
-    return chip;
-  }
-  function refreshChip(chip) {
-    var k = chip.dataset.key;
-    var e = effVal(k);
-    chip.classList.toggle("filled", isOn(k) && e.v !== "");
-    chip.classList.toggle("dflt", isDefaultVal(k));
-    chip.classList.toggle("off", !isOn(k));
-    var inp = $(".var-in", chip);
-    if (inp) {
-      inp.classList.toggle("derived", e.derived);
-      var d = V.byKey[k];
-      inp.placeholder = e.derived ? e.v : (d ? d.example : "<" + k + ">");
-    }
-    var on = $(".var-on", chip);
-    if (on && on.checked !== isOn(k)) on.checked = isOn(k);
-  }
-  function refreshVarChips() { $$(".var").forEach(refreshChip); }
-  function syncInputs(k, except) {
-    $$('.var[data-key="' + CSS.escape(k) + '"] .var-in').forEach(function (i) {
-      if (i !== except && i.value !== V.state.values[k]) i.value = V.state.values[k] || "";
-    });
-  }
-
-  function renderVarbar() {
-    var primary = $("#vb-primary"), other = $("#vb-other-chips");
-    primary.textContent = "";
-    other.textContent = "";
-    var gl = D.variable_groups || {};
-    var order = ["attacker", "victim", "cred"];
-    var first = true;
-    order.forEach(function (g) {
-      var defs = V.defs.filter(function (d) { return d.group === g; });
-      if (!defs.length) return;
-      if (!first) primary.appendChild(el("span", { class: "vg-sep", title: gl[g] || g }));
-      first = false;
-      defs.forEach(function (d) { var c = makeVarChip(d.key); c.title = gl[g] || g; primary.appendChild(c); });
-    });
-    var others = V.defs.filter(function (d) { return order.indexOf(d.group) < 0; });
-    if (others.length) {
-      other.appendChild(el("span", { class: "vg-label", text: gl.other || "その他", title: gl.other || "その他" }));
-      others.forEach(function (d) { other.appendChild(makeVarChip(d.key)); });
-    }
-    if (V.state.extra.length) {
-      other.appendChild(el("span", { class: "vg-label", text: "追加した変数", title: "ノートの穴埋めから追加した変数（✕ で外す）" }));
-      V.state.extra.forEach(function (k) { other.appendChild(makeVarChip(k)); });
-    }
-    renderAddSelect();
-    $("#vb-inline").checked = V.state.inlineApply;
-    $("#vb-undo").hidden = !V.undo;
-    updateVarsToggle();
-    // 2 段目の開閉: 手で閉じた／開いた状態（cs.ui.v1）があればそれを優先。無ければ値や追加変数があるときだけ自動で開く
-    var ui = lsGet(LS.ui, null) || {};
-    if (typeof ui.otherOpen === "boolean") {
-      setOtherOpen(ui.otherOpen);
-    } else {
-      var hasOtherValue = others.concat(V.state.extra.map(function (k) { return { key: k }; }))
-        .some(function (d) { return (V.state.values[d.key] || "") !== "" && (!V.byKey[d.key] || V.state.values[d.key] !== V.byKey[d.key].default); });
-      setOtherOpen(hasOtherValue || V.state.extra.length > 0);
-    }
-    updateTopH();
-  }
-  // save=true はユーザー操作（記憶する）。プログラムからの開閉は記憶しない
-  function setOtherOpen(open, save) {
-    var o = $("#vb-other"), b = $("#vb-more");
-    o.hidden = !open;
-    b.setAttribute("aria-expanded", open ? "true" : "false");
-    b.textContent = "その他の変数 " + (open ? "▴" : "▾");
-    if (save) {
-      var ui = lsGet(LS.ui, null) || {};
-      ui.otherOpen = !!open;
-      lsSet(LS.ui, ui);
-    }
-    updateTopH();
-  }
-  function closeVarbar() {
-    var vb = $("#varbar");
-    if (!vb.classList.contains("open")) return;
-    vb.classList.remove("open");
-    $("#vars-toggle").setAttribute("aria-expanded", "false");
-    updateTopH();
-  }
-  function renderAddSelect() {
-    var sel = $("#vb-add");
-    sel.textContent = "";
+  function renderVars() {
+    var main = $("#vars"), extra = $("#vars-extra");
+    main.textContent = ""; extra.textContent = "";
+    PRIMARY.forEach(function (k) { main.appendChild(varCard(k, false)); });
+    VKEYS.filter(function (k) { return PRIMARY.indexOf(k) < 0; }).forEach(function (k) { extra.appendChild(varCard(k, false)); });
+    V.extra.forEach(function (k) { if (VKEYS.indexOf(k) < 0) extra.appendChild(varCard(k, true)); });
+    // 追加・インライン反映
+    var tools = el("div", { class: "vars-extra-tools" });
+    var sel = el("select", { title: "ノートに現れる <X> を入力欄に追加する" });
     sel.appendChild(el("option", { value: "", text: "変数を追加…" }));
-    var ph = D.placeholders || {};
-    Object.keys(ph)
-      .filter(function (k) { return !isKnownKey(k); })
-      .sort(function (a, b) { return (ph[b] - ph[a]) || (a < b ? -1 : 1); })
-      .forEach(function (k) { sel.appendChild(el("option", { value: k, text: k + " (" + ph[k] + ")" })); });
-  }
-  function addExtra(k, focus) {
-    if (!k || isKnownKey(k)) return;
-    V.state.extra.push(k);
-    V.state.values[k] = "";
-    V.state.enabled[k] = true;
-    saveVars();
-    renderVarbar();
-    setOtherOpen(true);
-    rerenderNoteVars();
-    applyAll();
-    if (focus) {
-      var inp = $('#vb-other-chips .var[data-key="' + CSS.escape(k) + '"] .var-in');
-      if (inp) inp.focus();
-    }
-    toast("変数 <" + k + "> を追加しました");
-  }
-  function removeExtra(k) {
-    var i = V.state.extra.indexOf(k);
-    if (i < 0) return;
-    V.state.extra.splice(i, 1);
-    delete V.state.values[k];
-    delete V.state.enabled[k];
-    saveVars();
-    renderVarbar();
-    rerenderNoteVars();
-    applyAll();
-  }
-  function clearVars() {
-    var snapshot = {};
-    allKeys().forEach(function (k) { snapshot[k] = V.state.values[k] || ""; });
-    V.undo = snapshot;
-    allKeys().forEach(function (k) { V.state.values[k] = ""; });
-    saveVars();
-    $$(".var-in").forEach(function (i) { i.value = ""; });
-    $("#vb-undo").hidden = false;
-    applyAll();
-    toast("すべてクリアしました（「元に戻す」で復元）");
-  }
-  function undoClear() {
-    if (!V.undo) return;
-    Object.keys(V.undo).forEach(function (k) { if (isKnownKey(k)) V.state.values[k] = V.undo[k]; });
-    V.undo = null;
-    saveVars();
-    $$(".var").forEach(function (c) { var i = $(".var-in", c); if (i) i.value = V.state.values[c.dataset.key] || ""; });
-    $("#vb-undo").hidden = true;
-    applyAll();
-    toast("元に戻しました");
-  }
-  function initVarbar() {
-    loadVars();
-    renderVarbar();
-    $("#vb-more").addEventListener("click", function () { setOtherOpen($("#vb-other").hidden, true); });
-    $("#vb-inline").addEventListener("change", function (ev) {
-      V.state.inlineApply = ev.target.checked;
-      saveVars();
-      applyAll();
+    var present = allKeys();
+    Object.keys(D.placeholders || {}).forEach(function (k) {
+      if (present.indexOf(k) >= 0) return;
+      sel.appendChild(el("option", { value: k, text: k + "  (" + D.placeholders[k] + ")" }));
     });
-    $("#vb-add").addEventListener("change", function (ev) {
-      var k = ev.target.value;
-      ev.target.value = "";
-      addExtra(k, true);
+    sel.addEventListener("change", function () {
+      if (!sel.value) return;
+      if (V.extra.indexOf(sel.value) < 0) V.extra.push(sel.value);
+      saveVars(); renderVars(); applyVars();
+      var card = $('.var[data-key="' + sel.value + '"] input[type=text]');
+      if (card) card.focus();
     });
-    $("#vb-clear").addEventListener("click", clearVars);
-    $("#vb-undo").addEventListener("click", undoClear);
-    var VB = { openY: 0 };   // モバイルで開いた時のスクロール位置
-    $("#vars-toggle").addEventListener("click", function () {
-      var vb = $("#varbar");
-      var open = !vb.classList.contains("open");
-      vb.classList.toggle("open", open);
-      this.setAttribute("aria-expanded", open ? "true" : "false");
-      updateTopH();
-      if (open) {
-        VB.openY = window.scrollY;
-        var f = $(".var-in", vb); if (f && window.innerWidth >= 480) f.focus();
-      }
-    });
-    // 入力欄から抜けた位置を基準にし直す（入力中のキーボード表示によるスクロールで閉じない）
-    $("#varbar").addEventListener("focusout", function () { VB.openY = window.scrollY; });
-    // モバイル: 入力し終えて本文をスクロールし始めたら自動で閉じる（sticky ヘッダが画面を占有し続けない）
-    window.addEventListener("scroll", function () {
-      if (window.innerWidth >= 1024) return;
-      var vb = $("#varbar");
-      if (!vb.classList.contains("open")) return;
-      if (vb.contains(document.activeElement)) return;
-      if (Math.abs(window.scrollY - VB.openY) > 80) closeVarbar();
-    }, { passive: true });
+    var inl = el("input", { type: "checkbox" });
+    inl.checked = !!V.inlineApply;
+    inl.addEventListener("change", function () { V.inlineApply = inl.checked; saveVars(); applyVars(); });
+    tools.appendChild(sel);
+    tools.appendChild(el("label", { title: "OFF にすると詳細の本文中のインラインコードは置換しない" }, [inl, "本文のインラインコードにも反映"]));
+    extra.appendChild(tools);
+    extra.hidden = !UI.extraOpen;
+    $("#vars-more").setAttribute("aria-expanded", UI.extraOpen ? "true" : "false");
+    $("#vars-more").textContent = UI.extraOpen ? "その他の変数 ▴" : "その他の変数 ▾";
+    syncVarCards();
   }
 
-  // ---------------------------------------------------------------- recent
-  function getRecent() {
-    var r = lsGet(LS.recent, []);
-    return Array.isArray(r) ? r.filter(function (id) { return D.notes[id]; }) : [];
-  }
-  function pushRecent(id) {
-    var r = getRecent().filter(function (x) { return x !== id; });
-    r.unshift(id);
-    r = r.slice(0, 8);
-    lsSet(LS.recent, r);
-    renderNavRecent();
-  }
-  function renderNavRecent() {
-    var wrap = $("#nav-recent"), list = $("#nav-recent-list");
-    var r = getRecent();
-    list.textContent = "";
-    wrap.hidden = r.length === 0;
-    r.forEach(function (id) {
-      list.appendChild(el("li", null, el("a", { href: noteHref(id), text: noteTitle(id), title: D.notes[id].scene || "", dataset: { note: id } })));
+  function syncVarCards() {
+    var filled = 0, total = 0;
+    $$(".var").forEach(function (card) {
+      var k = card.dataset.key;
+      var raw = (V.values[k] || "").trim();
+      var d = varDef(k);
+      var isDefault = d && d["default"] && raw === d["default"];
+      card.classList.toggle("filled", !!raw && !isDefault);
+      card.classList.toggle("derived", !raw && !!derivedValue(k));
+      card.classList.toggle("off", !isOn(k));
+      var inp = $("input[type=text]", card);
+      if (inp && !raw && derivedValue(k)) inp.placeholder = derivedValue(k);
+      else if (inp && d) inp.placeholder = d.example || "";
+      if (VKEYS.indexOf(k) >= 0) { total++; if (raw && !isDefault) filled++; }
     });
-  }
-
-  // ---------------------------------------------------------------- nav
-  var NAV = { state: { g: {}, s: {} }, defaultsG: { playbook: true, port: true, situation: true, cve: false, folder: false } };
-  function navOpenG(gid) { var v = NAV.state.g[gid]; return typeof v === "boolean" ? v : (NAV.defaultsG[gid] !== undefined ? NAV.defaultsG[gid] : false); }
-  function navOpenS(gid, sid) { var v = NAV.state.s[gid + "/" + sid]; return typeof v === "boolean" ? v : (gid === "playbook" || gid === "cve"); }
-  function saveNav() { lsSet(LS.nav, NAV.state); }
-
-  function buildNav() {
-    var saved = lsGet(LS.nav, null);
-    if (saved && typeof saved === "object") NAV.state = { g: saved.g || {}, s: saved.s || {} };
-    var tree = $("#nav-tree");
-    tree.textContent = "";
-    D.nav.forEach(function (g) {
-      var count = g.sections.reduce(function (a, s) { return a + s.entries.length; }, 0);
-      var grp = el("div", { class: "ng" + (navOpenG(g.id) ? " open" : ""), dataset: { g: g.id } });
-      var hd = el("button", { type: "button", class: "ng-h", title: g.desc || "", "aria-expanded": navOpenG(g.id) ? "true" : "false" },
-        el("span", { class: "caret", text: "▶" }), el("span", { text: g.title }), el("span", { class: "cnt", text: String(count) }));
-      hd.addEventListener("click", function () {
-        var open = !grp.classList.contains("open");
-        grp.classList.toggle("open", open);
-        hd.setAttribute("aria-expanded", open ? "true" : "false");
-        NAV.state.g[g.id] = open;
-        saveNav();
-      });
-      grp.appendChild(hd);
-      var body = el("div", { class: "ng-body" });
-      g.sections.forEach(function (s) {
-        var sec = el("div", { class: "ns" + (navOpenS(g.id, s.id) ? " open" : ""), dataset: { g: g.id, s: s.id } });
-        var caret = el("button", { type: "button", class: "caret", title: "開閉", "aria-label": s.title + " を開閉" });
-        caret.addEventListener("click", function () {
-          var open = !sec.classList.contains("open");
-          sec.classList.toggle("open", open);
-          NAV.state.s[g.id + "/" + s.id] = open;
-          saveNav();
-        });
-        var t = el("a", { class: "ns-t", href: secHref(g.id, s.id), text: s.title, title: s.desc || s.title, dataset: { g: g.id, s: s.id } });
-        var sh = el("div", { class: "ns-h" }, caret, t, el("span", { class: "cnt", text: String(s.entries.length) }));
-        sec.appendChild(sh);
-        var ul = el("ul", { class: "ns-body" });
-        var lastSub = null;
-        s.entries.forEach(function (e) {
-          if (e.sub && e.sub !== lastSub) {
-            ul.appendChild(el("li", { class: "ne-sub", text: e.sub, title: e.sub }));
-          }
-          lastSub = e.sub || lastSub;
-          var ids = [e.note].concat(e.also || []);
-          ids.forEach(function (id, idx) {
-            var n = D.notes[id];
-            var li = el("li", { class: "ne", dataset: { q: (noteTitle(id) + " " + (e.scene || "") + " " + (e.keywords || "") + " " + (n ? n.keywords.join(" ") : "")).toLowerCase() } });
-            li.appendChild(el("a", { href: noteHref(id), text: (idx ? "└ " : "") + noteTitle(id), title: (e.scene || (n && n.scene) || ""), dataset: { note: id } }));
-            ul.appendChild(li);
-          });
-        });
-        sec.appendChild(ul);
-        body.appendChild(sec);
-      });
-      grp.appendChild(body);
-      tree.appendChild(grp);
-    });
-    $("#nav-meta").textContent = "ノート " + Object.keys(D.notes).length + " 本 · " + (D.meta.built_at || "");
-
-    // 絞り込み
-    var filt = $("#nav-filter");
-    filt.addEventListener("input", function () { filterNav(filt.value); });
-    filt.addEventListener("keydown", function (ev) {
-      if (ev.key === "Escape") { filt.value = ""; filterNav(""); filt.blur(); ev.stopPropagation(); }
-      if (ev.key === "Enter") {
-        var first = $("#nav-tree .ne:not(.nav-hidden) a");
-        if (first) { location.hash = first.getAttribute("href"); closeDrawer(); }
-      }
-    });
-
-    // ドロワー: リンクを踏んだら閉じる
-    $("#nav").addEventListener("click", function (ev) {
-      var a = ev.target.closest("a[href^='#/']");
-      if (a) closeDrawer();
-    });
-    $("#nav-toggle").addEventListener("click", function () { setDrawer(!$("#nav").classList.contains("open")); });
-    $("#backdrop").addEventListener("click", function () { closeDrawer(); });
-  }
-  function filterNav(q) {
-    var nav = $("#nav");
-    var terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    nav.classList.toggle("filtering", terms.length > 0);
-    var groups = $$("#nav-tree .ng");
-    if (!terms.length) {
-      $$(".nav-hidden", nav).forEach(function (x) { x.classList.remove("nav-hidden"); });
-      var old = $("#nav-tree .nav-empty"); if (old) old.remove();
-      return;
-    }
-    var any = false;
-    groups.forEach(function (g) {
-      var gAny = false;
-      $$(".ns", g).forEach(function (s) {
-        var st = ($(".ns-t", s).textContent || "").toLowerCase();
-        var secMatch = terms.every(function (t) { return st.indexOf(t) >= 0; });
-        var sAny = false;
-        $$(".ne", s).forEach(function (li) {
-          var hit = secMatch || terms.every(function (t) { return li.dataset.q.indexOf(t) >= 0; });
-          li.classList.toggle("nav-hidden", !hit);
-          if (hit) sAny = true;
-        });
-        $$(".ne-sub", s).forEach(function (li) { li.classList.add("nav-hidden"); });
-        s.classList.toggle("nav-hidden", !sAny);
-        if (sAny) gAny = true;
-      });
-      g.classList.toggle("nav-hidden", !gAny);
-      if (gAny) any = true;
-    });
-    var oldE = $("#nav-tree .nav-empty"); if (oldE) oldE.remove();
-    if (!any) $("#nav-tree").appendChild(el("div", { class: "nav-empty", text: "一致するノートがありません" }));
-  }
-  function setDrawer(open) {
-    $("#nav").classList.toggle("open", open);
-    $("#backdrop").hidden = !open;
-    $("#nav-toggle").setAttribute("aria-expanded", open ? "true" : "false");
-    if (open && window.innerWidth >= 480) $("#nav-filter").focus();
-  }
-  function closeDrawer() { if ($("#nav").classList.contains("open")) setDrawer(false); }
-  function setNavActive(noteId, gid, sid) {
-    $$("#nav .active").forEach(function (a) { a.classList.remove("active"); });
-    var target = null;
-    if (noteId) {
-      var links = $$('#nav-tree .ne a[data-note="' + CSS.escape(noteId) + '"]');
-      links.forEach(function (a) { a.classList.add("active"); });
-      // 開いているセクションにあればそれを、無ければ最初のものを開く
-      target = links.filter(function (a) { var s = a.closest(".ns"), g = a.closest(".ng"); return s && g && s.classList.contains("open") && g.classList.contains("open"); })[0] || links[0];
-      if (target) {
-        var s = target.closest(".ns"), g = target.closest(".ng");
-        if (s) s.classList.add("open");
-        if (g) g.classList.add("open");
-      }
-    } else if (gid && sid) {
-      var t = $('#nav-tree .ns-t[data-g="' + CSS.escape(gid) + '"][data-s="' + CSS.escape(sid) + '"]');
-      if (t) {
-        t.classList.add("active");
-        target = t;
-        var g2 = t.closest(".ng"); if (g2) g2.classList.add("open");
-        var s2 = t.closest(".ns"); if (s2) s2.classList.add("open");
-      }
-    }
-    if (target && typeof target.scrollIntoView === "function") {
-      var navEl = $("#nav");
-      var r = target.getBoundingClientRect(), nr = navEl.getBoundingClientRect();
-      if (r.top < nr.top + 40 || r.bottom > nr.bottom - 10) target.scrollIntoView({ block: "center" });
+    var tg = $("#vars-toggle");
+    if (tg) { tg.textContent = "変数 " + filled + "/" + total; tg.title = filled + "/" + total + " 入力済み"; }
+    var sm = $("#vars-summary");
+    if (sm) {
+      var parts = allKeys().filter(function (k) { return active(k) && !(varDef(k) && varDef(k)["default"] === valueOf(k)); }).map(function (k) { return k + "=" + valueOf(k); });
+      sm.textContent = parts.length ? parts.join(" · ") : "変数を入力する…";
+      sm.title = "クリックで変数欄を開く";
     }
   }
 
-  // ---------------------------------------------------------------- copy
-  function copyFallback(text) {
-    var ta = document.createElement("textarea");
-    ta.value = text;
-    ta.setAttribute("readonly", "");
-    ta.style.position = "fixed";
-    ta.style.top = "-2000px";
-    ta.style.left = "0";
-    document.body.appendChild(ta);
-    ta.focus();
-    ta.select();
-    try { ta.setSelectionRange(0, text.length); } catch (e) { /* ignore */ }
-    var ok = false;
-    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
-    document.body.removeChild(ta);
-    return ok;
+  // ------------------------------------------------------------ コピー
+  function copyText(t) {
+    if (navigator.clipboard && window.isSecureContext !== false) {
+      return navigator.clipboard.writeText(t).then(function () { return true; }, function () { return copyFallback(t); });
+    }
+    return Promise.resolve(copyFallback(t));
   }
-  function copyText(text) {
-    return new Promise(function (resolve) {
-      if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
-        navigator.clipboard.writeText(text).then(function () { resolve(true); }, function () { resolve(copyFallback(text)); });
-      } else {
-        resolve(copyFallback(text));
-      }
-    });
-  }
-  function selectNode(node) {
+  function copyFallback(t) {
     try {
-      var sel = window.getSelection(), range = document.createRange();
-      range.selectNodeContents(node);
-      sel.removeAllRanges();
-      sel.addRange(range);
-    } catch (e) { /* ignore */ }
+      var ta = document.createElement("textarea");
+      ta.value = t; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.left = "-9999px";
+      document.body.appendChild(ta); ta.select();
+      var ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) { return false; }
   }
-  function doCopyBlock(btn) {
-    var block = btn.closest(".code");
-    var pre = block && block.querySelector("pre");
-    if (!pre) return;
-    var text = pre.textContent.replace(/\n+$/, "");
-    // 残っている <X> は全部警告する（反映オフのものも <X> のまま貼られるので別枠で併記）
-    var keys = uniq($$(".ph-unset", pre).map(function (p) { return p.dataset.ph; }).filter(Boolean));
-    var unset = keys.filter(function (k) { return isOn(k); });
-    var off = keys.filter(function (k) { return !isOn(k); });
-    copyText(text).then(function (ok) {
-      if (ok) {
-        var old = btn.textContent;
-        btn.textContent = "コピーしました";
-        btn.classList.add(keys.length ? "warn" : "ok");
-        setTimeout(function () { btn.textContent = old; btn.classList.remove("ok", "warn"); }, 1500);
-        if (keys.length) {
-          var msg = [];
-          if (unset.length) msg.push("未入力: " + unset.join(", "));
-          if (off.length) msg.push("反映オフ: " + off.join(", "));
-          toast(msg.join(" · "), true);
-        }
-      } else {
-        selectNode(pre);
-        toast("コピーできませんでした。選択したので Ctrl+C で", true);
-      }
+  function copyCmd(rawText, btn) {
+    var out = substitute(rawText).replace(/\s+$/, "");
+    copyText(out).then(function (ok) {
+      var miss = unfilled(rawText);
+      if (!ok) toast("コピーできませんでした", true);
+      else if (miss.length) toast("コピーしました（未入力: " + miss.join(", ") + "）", true);
+      else toast("コピーしました");
+      if (btn) { var old = btn.textContent; btn.textContent = ok ? (old === "Copy" ? "Copied" : "コピー済み") : (old === "Copy" ? "Error" : "失敗"); setTimeout(function () { btn.textContent = old; }, 1200); }
     });
   }
 
-  // ---------------------------------------------------------------- tasks
-  function taskKey(id) { return LS.tasks + id; }
-  function loadTasks(id) { var v = lsGet(taskKey(id), []); return Array.isArray(v) ? v : []; }
-  function saveTasks(id, body) {
-    var done = $$(".task-box", body).filter(function (b) { return b.checked; }).map(function (b) { return parseInt(b.dataset.task, 10); });
-    if (done.length) lsSet(taskKey(id), done); else lsDel(taskKey(id));
-    updateTaskProgress(body);
+  // ------------------------------------------------------------ ターミナル部品
+  function promptFor(lang) {
+    if (/^(powershell|ps1|pwsh)$/.test(lang)) return "PS>";
+    if (/^(cmd|bat|batch|dos)$/.test(lang)) return "C:\\>";
+    if (/sql/.test(lang)) return "SQL>";
+    if (lang === "python" || lang === "py") return ">>>";
+    if (lang === "cypher") return "neo4j>";
+    return "$";
   }
-  function updateTaskProgress(body) {
-    var boxes = $$(".task-box", body);
-    var p = $("#task-progress");
-    if (p) p.textContent = boxes.filter(function (b) { return b.checked; }).length + "/" + boxes.length + " 完了";
+  var SHELL_LANGS = /^(bash|sh|zsh|shell|console|powershell|ps1|pwsh|cmd|bat|batch|dos|sql|mysql|psql|tsql|cypher)$/;
+  function cmdHtml(c) {
+    var h = phHtml(c.text);
+    var rx = null;
+    if (/^(bash|sh|zsh|shell|console|powershell|ps1|pwsh|python|py)$/.test(c.lang)) rx = /^(\s*#(?!!).*)$/gm;
+    else if (/^(cmd|bat|batch|dos)$/.test(c.lang)) rx = /^(\s*(?:::|[Rr][Ee][Mm]\s).*)$/gm;
+    else if (/sql/.test(c.lang)) rx = /^(\s*--.*)$/gm;
+    return rx ? h.replace(rx, '<span class="c">$1</span>') : h;
   }
-
-  // ---------------------------------------------------------------- note
-  var CUR = { noteId: null, body: null };
-
-  function enhanceBody(body, id) {
-    // 「構文」セクション（h2.sec-syntax から次の h2 まで）の言語無しブロックは出力例ではなく構文
-    var inSyntax = false;
-    for (var ci = 0; ci < body.children.length; ci++) {
-      var ch = body.children[ci];
-      if (ch.tagName === "H2") inSyntax = ch.classList.contains("sec-syntax");
-      else if (inSyntax && ch.classList.contains("code-out")) ch.classList.add("code-syntax");
-    }
-    // コードブロックのツールバー
-    $$(".code", body).forEach(function (c) {
-      var lang = c.dataset.lang || "";
-      var out = c.classList.contains("code-out");
-      var syn = c.classList.contains("code-syntax");
-      var label = syn ? "構文" : (out ? (lang || (c.closest(".callout-example") ? "出力" : "")) : lang);
-      var title = syn ? "構文をコピー" : (out ? "出力例をコピー" : "置換後のコマンドをコピー");
-      var bar = el("div", { class: "code-bar" },
-        el("span", { class: "lang", text: label }),
-        el("button", { type: "button", class: "copy", text: "コピー", title: title }));
-      c.appendChild(bar);
-      if (!out) { var pre = $("pre", c); if (pre) pre.title = "クリックでコピー"; }
+  function isFileContent(c) {
+    if (c.text.indexOf("\n") < 0) return false;
+    if (/^(#!|#include|<\?php|<!--|<script|import |using |package |function |def |class |\{|\[)/.test(c.text)) return true;
+    return !SHELL_LANGS.test(c.lang);
+  }
+  function terminal(cmds, title) {
+    var copyAll = el("button", { class: "t-copy", type: "button", text: "Copy", title: "このブロックのコマンドをすべてコピー" });
+    copyAll.addEventListener("click", function () { copyCmd(cmds.map(function (c) { return c.text; }).join("\n"), copyAll); });
+    var head = el("div", { class: "t-head" }, [dotsEl(), el("span", { class: "t-title", text: title || (D.meta.short || "oscp.sh") }), copyAll]);
+    var body = el("div", { class: "t-body" });
+    cmds.forEach(function (c) {
+      if (c.caption) body.appendChild(el("div", { class: "t-cap", html: "# " + captionHtml(c.caption) }));
+      var cp = el("button", { class: "cp", type: "button", title: "このコマンドをコピー", text: "⧉" });
+      cp.addEventListener("click", function () { copyCmd(c.text); });
+      var file = isFileContent(c);
+      body.appendChild(el("div", { class: "t-line" + (file ? " t-file" : "") }, [
+        el("span", { class: "prompt", text: file ? "" : promptFor(c.lang) }),
+        el("code", { class: "cmd", html: cmdHtml(c) }),
+        cp,
+      ]));
     });
-    // 「書き換える場所」表の 1 列目はキー名の対応表なので、置換後も <KEY> 表示を保つ（applyPh が .ph-key を見る）
-    $$("h2.sec-vars + .tbl td:first-child .ph", body).forEach(function (ph) { ph.classList.add("ph-key"); });
-    // 3 列以上の表はモバイルでカード化できるよう、各セルに見出しを持たせる
-    $$(".tbl", body).forEach(function (t) {
-      var ths = $$("thead th", t);
-      if (ths.length < 3) return;
-      t.classList.add("tbl-cards");
-      var labels = ths.map(function (th) { return th.textContent.trim(); });
-      $$("tbody tr", t).forEach(function (tr) {
-        var tds = tr.children;
-        for (var i = 0; i < tds.length && i < labels.length; i++) {
-          if (labels[i]) tds[i].dataset.label = labels[i];
-        }
-      });
-    });
-    // タスク
-    var boxes = $$(".task-box", body);
-    if (boxes.length) {
-      var done = loadTasks(id);
-      boxes.forEach(function (b) {
-        var n = parseInt(b.dataset.task, 10);
-        b.checked = done.indexOf(n) >= 0;
-        b.disabled = false;
-        var li = b.closest("li");
-        if (li) li.classList.toggle("done", b.checked);
-        b.addEventListener("change", function () {
-          if (li) li.classList.toggle("done", b.checked);
-          saveTasks(id, body);
-        });
-      });
-    }
-    // 画像（attempts では img/ が無いので壊れたら隠す）
-    $$("img.img", body).forEach(function (img) {
-      img.addEventListener("error", function () { img.classList.add("broken"); });
-      if (img.complete && img.naturalWidth === 0 && img.src) img.classList.add("broken");
-    });
-    // 見出しクリックで URL を更新（履歴は増やさない）
-    $$("h2[id], h3[id]", body).forEach(function (h) {
-      h.style.cursor = "pointer";
-      h.title = "クリックでこの見出しの URL にする";
-      h.addEventListener("click", function (ev) {
-        if (ev.target.closest("a")) return;
-        try { history.replaceState(null, "", noteHref(id, h.id)); } catch (e) { /* ignore */ }
-      });
-    });
-    applyPh(body);
+    return el("div", { class: "terminal" }, [head, body]);
   }
 
-  function folderSection(folder) {
-    var g = D.nav.filter(function (x) { return x.id === "folder"; })[0];
-    if (!g) return null;
-    var want = folder.replace(/\//g, " / ");
-    var s = g.sections.filter(function (x) { return x.title === want; })[0];
-    return s ? { g: "folder", s: s.id } : null;
-  }
-
-  var NV = { moreOpen: false };   // 「+ 他 N 個」の開閉（ノート内で追加操作を続けられるよう再描画をまたいで保持）
-  function noteVarsRow(n) {
-    var row = el("div", { class: "note-vars" }, el("span", { class: "lbl", text: "このノートで使う変数" }));
-    var known = [], extra = [];
-    (n.placeholders || []).forEach(function (k) { (isKnownKey(k) ? known : extra).push(k); });
-    known.forEach(function (k) { row.appendChild(makeVarChip(k, { compact: true })); });
-    if (extra.length) {
-      // 入力欄に無い <X> は 1 つのボタンに畳む（10〜20 個並んで本文を押し下げないように）
-      var wrap = el("span", { class: "nv-extra", hidden: !NV.moreOpen });
-      extra.forEach(function (k) {
-        var b = el("button", { type: "button", class: "chip", text: "+ " + k, title: "<" + k + "> を入力欄に追加する" });
-        b.addEventListener("click", function () { addExtra(k, true); });
-        wrap.appendChild(b);
-      });
-      var moreText = function (open) { return (known.length ? "他 " : "穴埋め ") + extra.length + " 個 " + (open ? "▴" : "▾"); };
-      var more = el("button", { type: "button", class: "chip nv-more", text: moreText(NV.moreOpen), "aria-expanded": NV.moreOpen ? "true" : "false",
-        title: "入力欄に無い穴埋め。開いて押すと入力欄に追加できる" });
-      more.addEventListener("click", function () {
-        NV.moreOpen = wrap.hidden;
-        wrap.hidden = !NV.moreOpen;
-        more.setAttribute("aria-expanded", NV.moreOpen ? "true" : "false");
-        more.textContent = moreText(NV.moreOpen);
-      });
-      row.appendChild(more);
-      row.appendChild(wrap);
-    }
-    if (!known.length && !extra.length) row.appendChild(el("span", { class: "muted small", text: "穴埋めなし" }));
-    return row;
-  }
-  function rerenderNoteVars() {
-    var old = $("#main .note-vars");
-    if (!old || !CUR.noteId || !D.notes[CUR.noteId]) return;
-    old.replaceWith(noteVarsRow(D.notes[CUR.noteId]));
-  }
-
-  function renderNote(id, slug) {
-    var n = D.notes[id];
-    var main = $("#main");
-    if (!n) { renderNotFound(id); return; }
-    var sameNote = CUR.noteId === id && CUR.body && main.contains(CUR.body);
-    if (!sameNote) {
-      main.textContent = "";
-      var frag = document.createDocumentFragment();
-
-      // パンくず
-      var crumbs = el("div", { class: "crumbs" }, el("a", { href: "#/", text: SITE }), el("span", { text: "/" }));
-      var fs = folderSection(n.folder);
-      var parts = n.folder.split("/");
-      parts.forEach(function (p, i) {
-        var last = i === parts.length - 1;
-        if (last && fs) crumbs.appendChild(el("a", { href: secHref(fs.g, fs.s), text: p }));
-        else crumbs.appendChild(el("a", { href: "#/all", text: p }));
-        if (!last) crumbs.appendChild(el("span", { text: "/" }));
-      });
-      frag.appendChild(crumbs);
-
-      // タイトル行
-      var kindLabel = { tool: "ツール", cve: "CVE", playbook: "プレイブック" }[n.kind] || n.kind;
-      var obs = "obsidian://open?vault=" + enc(D.meta.vault_name || "") + "&file=" + enc(n.path.replace(/\.md$/, ""));
-      var head = el("div", { class: "note-head" },
-        el("h1", { text: n.title }),
-        el("span", { class: "badge" + (n.kind === "playbook" ? " badge-accent" : ""), text: kindLabel }),
-        el("div", { class: "tools" },
-          el("a", { class: "btn btn-sm", href: obs, text: "Obsidian で開く", title: n.path })));
-      frag.appendChild(head);
-
-      // パスはパンくずと重複するので出さない（「Obsidian で開く」の title に残す）
-      if (n.checked || n.mtime) {
-        var meta = el("div", { class: "note-meta" });
-        if (n.checked) meta.appendChild(el("span", { class: "badge badge-accent", text: "確認日 " + n.checked }));
-        if (n.mtime) meta.appendChild(el("span", { text: "更新 " + n.mtime }));
-        frag.appendChild(meta);
-      }
-
-      if (n.scene) frag.appendChild(el("p", { class: "note-scene", text: n.scene }));
-      if (n.keywords && n.keywords.length) {
-        var kw = el("div", { class: "kw-row" }, el("span", { class: "lbl", text: "検索語" }));
-        n.keywords.forEach(function (k) {
-          var b = el("button", { type: "button", class: "chip", text: k, title: "この語で検索" });
-          b.addEventListener("click", function () { openPalette(k); });
-          kw.appendChild(b);
-        });
-        frag.appendChild(kw);
-      }
-
-      NV.moreOpen = false;
-      frag.appendChild(noteVarsRow(n));
-
-      // 本文（ビルド出力なので innerHTML でよい）。目次・タスク操作より先に作り、本文の実態から判定する
-      var body = el("div", { class: "note-body" });
-      body.innerHTML = n.html;
-      enhanceBody(body, id);
-
-      // 目次
-      if (n.headings && n.headings.length) {
-        var toc = el("div", { class: "toc" }, el("span", { class: "lbl", text: "目次" }));
-        n.headings.forEach(function (h) {
-          var special = /^(書き換える場所|詰まったら|関連)$/.test(h.text);
-          toc.appendChild(el("a", { href: noteHref(id, h.slug), text: h.text, title: h.text, class: (h.level === 3 ? "toc-h3" : "") + (special ? " toc-sec" : "") }));
-        });
-        frag.appendChild(toc);
-      }
-      // タスク操作（本文に .task-box があるノートだけ。目次の有無とは独立）
-      if ($(".task-box", body)) {
-        var rb = el("button", { type: "button", class: "btn btn-sm", text: "チェックをリセット" });
-        rb.addEventListener("click", function () {
-          lsDel(taskKey(id));
-          $$(".task-box", CUR.body).forEach(function (b) { b.checked = false; var li = b.closest("li"); if (li) li.classList.remove("done"); });
-          updateTaskProgress(CUR.body);
-          toast("チェックをリセットしました");
-        });
-        frag.appendChild(el("div", { class: "task-tools" }, el("span", { id: "task-progress", text: "" }), rb));
-      }
-      frag.appendChild(body);
-
-      // 被リンク
-      if (n.backlinks && n.backlinks.length) {
-        var bl = el("div", { class: "backlinks" }, el("h2", { text: "このノートへのリンク（" + n.backlinks.length + "）" }));
-        var cloud = el("div", { class: "link-cloud" });
-        n.backlinks.forEach(function (b) { cloud.appendChild(el("a", { class: "chip", href: noteHref(b), text: noteTitle(b), title: D.notes[b] ? D.notes[b].scene || "" : "" })); });
-        bl.appendChild(cloud);
-        frag.appendChild(bl);
-      }
-
-      main.appendChild(frag);
-      CUR.noteId = id;
-      CUR.body = body;
-      updateTaskProgress(body);
-      pushRecent(id);
-    }
-    document.title = n.title + " | " + SITE;
-    setNavActive(id);
-    if (slug) scrollToHeading(slug); else if (!sameNote) window.scrollTo(0, 0); else window.scrollTo({ top: 0 });
-  }
-  function scrollToHeading(slug) {
-    var body = CUR.body;
-    if (!body) return;
-    var target = document.getElementById(slug);
-    if (!target || !body.contains(target)) {
-      target = $$("h2[id], h3[id]", body).filter(function (h) { return h.id === slug; })[0] || null;
-    }
-    if (!target) {
-      // 「1.-x」のような表記ゆれ（空白/ハイフン）を吸収
-      var norm = function (s) { return s.replace(/[\s\-]+/g, "").toLowerCase(); };
-      var want = norm(slug);
-      target = $$("h2[id], h3[id]", body).filter(function (h) { return norm(h.id) === want; })[0] || null;
-    }
-    if (target) {
-      target.scrollIntoView({ block: "start" });
-      target.classList.add("ph-cur");
-      setTimeout(function () { target.classList.remove("ph-cur"); }, 1200);
-    }
-  }
-
-  // ---------------------------------------------------------------- other pages
-  // ノート以外の画面に共通の前後処理
-  function beginPage(cls) {
-    $("#main").textContent = "";
-    CUR.noteId = null; CUR.body = null;
-    return el("div", { class: "page" + (cls ? " " + cls : "") });
-  }
-  function endPage(page, title, gid, sid) {
-    $("#main").appendChild(page);
-    document.title = title;
-    setNavActive(null, gid, sid);
-    window.scrollTo(0, 0);
-  }
-
-  function renderNotFound(id) {
-    var page = beginPage("notfound");
-    page.appendChild(el("h1", { text: "ノートが見つかりません" }));
-    page.appendChild(el("p", { class: "lead" }, "「", el("span", { class: "mono", text: id || "" }), "」というノートは無い。Vault 側で改名・削除された可能性がある。"));
-    // 近い名前を提案
-    var q = (id || "").toLowerCase();
-    var cands = q ? Object.keys(D.notes).filter(function (k) { return k.toLowerCase().indexOf(q) >= 0 || q.indexOf(k.toLowerCase()) >= 0; }).slice(0, 8) : [];
-    if (cands.length) {
-      page.appendChild(el("p", { class: "muted small", text: "近い名前のノート:" }));
-      var ul = el("ul", { class: "list" });
-      cands.forEach(function (k) { ul.appendChild(el("li", null, el("a", { class: "t", href: noteHref(k), text: noteTitle(k) }), el("span", { class: "s", text: D.notes[k].scene || "" }))); });
-      page.appendChild(ul);
-    }
-    var actions = el("div", { class: "quick" }, el("a", { class: "btn btn-accent", href: "#/", text: "ホームへ" }));
-    var sb = el("button", { type: "button", class: "btn", text: "検索 (Ctrl+K)" });
-    sb.addEventListener("click", function () { openPalette(id || ""); });
-    actions.appendChild(sb);
-    page.appendChild(actions);
-    endPage(page, "ノートが見つかりません | " + SITE);
-  }
-
-  function entryList(entries, withScene) {
-    var ul = el("ul", { class: "list" });
-    entries.forEach(function (e) {
-      var id = e.note || e.id || e;
-      var n = D.notes[id];
-      ul.appendChild(el("li", null,
-        el("a", { class: "t", href: noteHref(id), text: noteTitle(id) }),
-        withScene !== false ? el("span", { class: "s", text: e.scene || (n && n.scene) || "", title: e.scene || (n && n.scene) || "" }) : null));
-    });
-    return ul;
-  }
-  function sectionChips(g) {
-    var wrap = el("div", { class: "chips" });
-    g.sections.forEach(function (s) {
-      wrap.appendChild(el("a", { href: secHref(g.id, s.id), title: s.desc || s.title }, s.title, el("span", { class: "n", text: String(s.entries.length) })));
-    });
-    return wrap;
-  }
-
-  function renderHome() {
-    var page = beginPage("home");
-    page.appendChild(el("h1", { text: D.meta.title || SITE }));
-    page.appendChild(el("p", { class: "lead", text: D.meta.subtitle || "" }));
-
-    var quick = el("div", { class: "quick" });
-    var sb = el("button", { type: "button", class: "btn btn-accent", text: "検索 (Ctrl+K)" });
-    sb.addEventListener("click", function () { openPalette(""); });
-    quick.appendChild(sb);
-    quick.appendChild(el("span", { class: "muted small" }, el("span", { class: "kbd", text: "/" }), " でも開く · 左のナビは絞り込み可"));
-    page.appendChild(quick);
-
-    var grid = el("div", { class: "home-grid" });
-    var byId = {};
-    D.nav.forEach(function (g) { byId[g.id] = g; });
-
-    // プレイブック
-    if (byId.playbook) {
-      var pb = el("div", { class: "home-box" }, el("h2", null, "プレイブック", el("span", { class: "cnt", text: String(byId.playbook.sections.reduce(function (a, s) { return a + s.entries.length; }, 0)) })));
-      pb.appendChild(el("p", { class: "muted small", text: byId.playbook.desc || "" }));
-      byId.playbook.sections.forEach(function (s) { pb.appendChild(entryList(s.entries)); });
-      grid.appendChild(pb);
-    }
-    // 最近
-    var recent = getRecent();
-    var rb = el("div", { class: "home-box" }, el("h2", null, "最近見たノート", el("span", { class: "cnt", text: String(recent.length) })));
-    if (recent.length) rb.appendChild(entryList(recent.map(function (id) { return { note: id }; })));
-    else rb.appendChild(el("p", { class: "muted small", text: "まだありません。開いたノートがここに並ぶ。" }));
-    grid.appendChild(rb);
-    // ポート
-    if (byId.port) {
-      var pt = el("div", { class: "home-box" }, el("h2", null, byId.port.title, el("span", { class: "cnt", text: String(byId.port.sections.length) })));
-      pt.appendChild(el("p", { class: "muted small", text: byId.port.desc || "" }));
-      pt.appendChild(sectionChips(byId.port));
-      grid.appendChild(pt);
-    }
-    // 状況
-    if (byId.situation) {
-      var st = el("div", { class: "home-box" }, el("h2", null, byId.situation.title, el("span", { class: "cnt", text: String(byId.situation.sections.length) })));
-      st.appendChild(el("p", { class: "muted small", text: byId.situation.desc || "" }));
-      st.appendChild(sectionChips(byId.situation));
-      grid.appendChild(st);
-    }
-    // CVE
-    if (byId.cve) {
-      var cv = el("div", { class: "home-box" }, el("h2", null, byId.cve.title, el("span", { class: "cnt", text: String(byId.cve.sections.reduce(function (a, s) { return a + s.entries.length; }, 0)) })));
-      cv.appendChild(el("p", { class: "muted small", text: byId.cve.desc || "" }));
-      byId.cve.sections.forEach(function (s) { cv.appendChild(entryList(s.entries)); });
-      grid.appendChild(cv);
-    }
-    // 外部
-    if (D.external && D.external.length) {
-      var ex = el("div", { class: "home-box" }, el("h2", null, "外部リファレンス", el("span", { class: "cnt", text: String(D.external.length) })));
-      var ul = el("ul", { class: "list" });
-      D.external.forEach(function (e) {
-        ul.appendChild(el("li", null, el("a", { class: "t ext", href: e.url, target: "_blank", rel: "noopener noreferrer", text: e.title }), el("span", { class: "s", text: e.scene || "" })));
-      });
-      ex.appendChild(ul);
-      ex.appendChild(el("p", { class: "small" }, el("a", { href: "#/ext", text: "一覧 →" })));
-      grid.appendChild(ex);
-    }
-    page.appendChild(grid);
-
-    var c = filledCount();
-    page.appendChild(el("div", { class: "home-meta", text: "ノート " + Object.keys(D.notes).length + " 本 · 生成 " + (D.meta.built_at || "?") + " · " + (D.meta.generator || "") + " · 変数 " + c.n + "/" + c.total + " 入力済み" + (D.orphans && D.orphans.length ? " · MOC 未掲載 " + D.orphans.length : "") }));
-    endPage(page, SITE);
-  }
-
-  function renderSection(gid, sid) {
-    var g = D.nav.filter(function (x) { return x.id === gid; })[0];
-    var s = g && g.sections.filter(function (x) { return x.id === sid; })[0];
-    if (!s) { renderNotFound(gid + "/" + sid); return; }
-    var page = beginPage("sec-table");
-    page.appendChild(el("div", { class: "crumbs" }, el("a", { href: "#/", text: SITE }), el("span", { text: "/" }), el("span", { text: g.title })));
-    page.appendChild(el("h1", null, s.title, el("span", { class: "cnt badge", text: s.entries.length + " 本" })));
-    if (s.desc) page.appendChild(el("p", { class: "lead", text: s.desc }));
-    var tbl = el("div", { class: "tbl" });
-    var table = el("table", null, el("thead", null, el("tr", null, el("th", { text: "引きたい状況" }), el("th", { text: "ノート" }), el("th", { text: "検索語" }))));
-    var tb = el("tbody");
-    var lastSub = null;
-    s.entries.forEach(function (e) {
-      if (e.sub && e.sub !== lastSub) {
-        tb.appendChild(el("tr", { class: "sub-row" }, el("td", { colspan: "3", text: e.sub })));
-        lastSub = e.sub;
-      }
-      var noteCell = el("td", null, el("a", { href: noteHref(e.note), text: noteTitle(e.note) }));
-      (e.also || []).forEach(function (a) { noteCell.appendChild(el("span", { class: "also" }, " / ", el("a", { href: noteHref(a), text: noteTitle(a) }))); });
-      tb.appendChild(el("tr", null, el("td", { text: e.scene || "" }), noteCell, el("td", { class: "kw", text: e.keywords || "" })));
-    });
-    table.appendChild(tb);
-    tbl.appendChild(table);
-    page.appendChild(tbl);
-    // 同じグループ内の他セクション
-    var others = el("div", { class: "chips" });
-    g.sections.forEach(function (x) { if (x.id !== s.id) others.appendChild(el("a", { href: secHref(g.id, x.id), text: x.title })); });
-    if (others.childNodes.length) {
-      page.appendChild(el("h2", { text: g.title + " の他のセクション" }));
-      page.appendChild(others);
-    }
-    endPage(page, s.title + " | " + SITE, gid, sid);
-  }
-
-  function renderAll() {
-    var page = beginPage("");
-    page.appendChild(el("h1", null, "全ノート（フォルダ順）", el("span", { class: "cnt badge", text: Object.keys(D.notes).length + " 本" })));
-    var g = D.nav.filter(function (x) { return x.id === "folder"; })[0];
-    if (g) {
-      var jump = el("div", { class: "chips" });
-      g.sections.forEach(function (s) { jump.appendChild(el("a", { href: "#/all", dataset: { jump: "f-" + s.id } }, s.title, el("span", { class: "n", text: String(s.entries.length) }))); });
-      jump.addEventListener("click", function (ev) {
-        var a = ev.target.closest("a[data-jump]");
-        if (!a) return;
-        ev.preventDefault();
-        var t = document.getElementById(a.dataset.jump);
-        if (t) t.scrollIntoView({ block: "start" });
-      });
-      page.appendChild(jump);
-      g.sections.forEach(function (s) {
-        page.appendChild(el("h2", { id: "f-" + s.id, style: "scroll-margin-top: calc(var(--top-h, 42px) + 8px)" }, s.title, el("span", { class: "cnt", text: String(s.entries.length) })));
-        page.appendChild(entryList(s.entries));
-      });
-    } else {
-      page.appendChild(entryList(Object.keys(D.notes).sort().map(function (id) { return { note: id }; })));
-    }
-    endPage(page, "全ノート | " + SITE);
-  }
-
-  function renderExt() {
-    var page = beginPage("");
-    page.appendChild(el("h1", { text: "外部リファレンス" }));
-    page.appendChild(el("p", { class: "lead", text: "Vault に無いものを引く先。別タブで開く（試験 VM では通信不可の場合あり）。" }));
-    var ul = el("ul", { class: "list ext-list" });
-    (D.external || []).forEach(function (e) {
-      ul.appendChild(el("li", null,
-        el("a", { class: "ext", href: e.url, target: "_blank", rel: "noopener noreferrer", text: e.title }),
-        e.scene ? el("span", { class: "muted", text: " — " + e.scene }) : null,
-        el("span", { class: "u", text: e.url })));
-    });
-    page.appendChild(ul);
-    endPage(page, "外部リファレンス | " + SITE);
-  }
-
-  function renderNoData() {
-    var main = $("#main");
-    main.textContent = "";
-    main.appendChild(el("div", { class: "page" },
-      el("h1", { text: SITE }),
-      el("div", { class: "setup" },
-        el("p", null, el("strong", { text: "data.js が読み込めていません。" })),
-        el("p", null, "リポジトリ直下で ", el("code", { text: "python3 build.py" }), " を実行して docs/data.js を生成してください。"),
-        el("p", { class: "muted small", text: "Vault のノートを直したら ./update.sh（build → commit → push）。" }))));
-    document.title = SITE;
-  }
-
-  // ---------------------------------------------------------------- router
-  function parseRoute() {
+  // ------------------------------------------------------------ ルーティング
+  function parseHash() {
     var h = location.hash || "#/";
-    if (h.charAt(0) === "#") h = h.slice(1);
-    if (h.charAt(0) !== "/") h = "/" + h;
-    var parts = h.split("/").slice(1);
-    var kind = dec(parts[0] || "");
-    if (kind === "") return { kind: "home" };
-    if (kind === "n" && parts.length >= 2) return { kind: "note", id: dec(parts[1]), slug: parts.length > 2 ? parts.slice(2).map(dec).join("/") : "" };
-    if (kind === "s" && parts.length >= 3) return { kind: "section", g: dec(parts[1]), s: dec(parts[2]) };
-    if (kind === "all") return { kind: "all" };
+    var parts = h.replace(/^#\/?/, "").split("/");
+    var kind = parts[0] || "";
+    if (!kind) return { kind: "home" };
+    if (kind === "n") return { kind: "note", id: safeDecode(parts[1] || ""), slug: safeDecode(parts.slice(2).join("/")) };
+    if (kind === "c") return { kind: "cat", id: parts[1] || "" };
     if (kind === "ext") return { kind: "ext" };
-    return { kind: "notfound", id: parts.map(dec).join("/") };
+    return { kind: "home" };
   }
+  function safeDecode(s) { try { return decodeURIComponent(s); } catch (e) { return s; } }
+  var CUR = { noteId: null, catId: null };
+
   function route() {
-    var r = parseRoute();
-    closePalette();
-    closeDrawer();
-    if (window.innerWidth < 1024) closeVarbar();   // モバイルでは別画面へ移ったら変数バーも畳む
-    try {
-      if (r.kind === "home") renderHome();
-      else if (r.kind === "note") renderNote(r.id, r.slug);
-      else if (r.kind === "section") renderSection(r.g, r.s);
-      else if (r.kind === "all") renderAll();
-      else if (r.kind === "ext") renderExt();
-      else renderNotFound(r.id);
-    } catch (e) {
-      renderNotFound(r.id || "");
-      throw e;
+    var r = parseHash();
+    closeSidebar(); closePalette();
+    var main = $("#content");
+    main.textContent = "";
+    $("#topbar").classList.remove("pinned");
+    window.scrollTo(0, 0);
+    if (r.kind === "home") renderHome(main);
+    else if (r.kind === "note") {
+      var n = NOTES[r.id];
+      if (!n) { renderNotFound(main, r.id); }
+      else renderCategory(main, (NOTE_GROUP[n.id] || {}).cat || CATS[0], n.id, r.slug);
     }
-    updateTopH();
+    else if (r.kind === "cat") {
+      var c = CAT_BY_ID[r.id];
+      if (!c) { renderNotFound(main, r.id); }
+      else {
+        var first = (c.first && NOTES[c.first]) ? c.first : (c.groups.length && c.groups[0].notes.length ? c.groups[0].notes[0] : null);
+        renderCategory(main, c, first, "");
+      }
+    }
+    else if (r.kind === "ext") renderExt(main);
+    else renderHome(main);
+    setNavActive();
+    applyVars(main);
   }
 
-  // ---------------------------------------------------------------- search
+  function setWorkspace(path) { $("#ws-value").textContent = path; }
+
+  // ------------------------------------------------------------ 左ナビ
+  function renderNav() {
+    var nav = $("#nav");
+    nav.textContent = "";
+    nav.appendChild(el("a", { href: "#/", dataset: { nav: "home" } }, [el("span", { class: "chev", text: "›" }), "ホーム"]));
+    CATS.forEach(function (c) {
+      nav.appendChild(el("a", { href: catHref(c.id), dataset: { nav: c.id }, title: c.desc }, [
+        el("span", { class: "chev", text: "›" }), c.title, el("span", { class: "cnt", text: String(c.count) }),
+      ]));
+    });
+    if (D.external && D.external.length) nav.appendChild(el("a", { href: "#/ext", class: "nav-ext", dataset: { nav: "ext" } }, [el("span", { class: "chev", text: "↗" }), "外部リファレンス"]));
+    $("#side-meta").textContent = D.meta.note_count + " notes"; $("#side-meta").title = "最終ビルド " + (D.meta.built_at || "");
+    $("#brand-name").textContent = D.meta.short || "oscp.sh";
+    $("#foot-left").textContent = (D.meta.short || "oscp.sh").toUpperCase();
+  }
+  function setNavActive() {
+    var key = CUR.catId || "";
+    $$("#nav a").forEach(function (a) { a.classList.toggle("active", a.dataset.nav === key); });
+  }
+  function openSidebar() { $("#sidebar").classList.add("open"); $("#backdrop").hidden = false; $("#menu-btn").setAttribute("aria-expanded", "true"); }
+  function closeSidebar() { $("#sidebar").classList.remove("open"); $("#backdrop").hidden = true; $("#menu-btn").setAttribute("aria-expanded", "false"); }
+
+  // ------------------------------------------------------------ ホーム
+  function pathEl(parts) {
+    var p = el("div", { class: "path" }, [el("span", { class: "tilde", text: "~" }), "/" + (D.meta.short || "oscp.sh")]);
+    parts.forEach(function (x) { p.appendChild(document.createTextNode("/")); p.appendChild(typeof x === "string" ? document.createTextNode(x) : x); });
+    return p;
+  }
+  function renderHome(main) {
+    CUR.noteId = null; CUR.catId = "home";
+    document.title = D.meta.title;
+    setWorkspace("/");
+    var short = D.meta.short || "oscp.sh";
+    var dot = short.indexOf(".");
+    var h1 = el("h1", {}, dot > 0 ? [short.slice(0, dot), el("span", { text: short.slice(dot) })] : [short]);
+    var cmdCount = 0;
+    Object.keys(NOTES).forEach(function (id) { cmdCount += (NOTES[id].commands || []).length; });
+    var adCat = CAT_BY_ID.ad, scanCat = CAT_BY_ID.scan;
+
+    var heroTerm = el("div", { class: "terminal" }, [
+      el("div", { class: "t-head" }, [dotsEl(), el("span", { class: "t-title", text: short })]),
+      el("div", { class: "t-body" }, [
+        el("span", { class: "m-line cmdline" }, [el("span", { class: "prompt", text: "$" }), "./" + short + " --objective"]),
+        el("span", { class: "m-line" }, [el("span", { class: "i", text: "[+]" }), "足場を取る"]),
+        el("span", { class: "m-line" }, [el("span", { class: "i", text: "[+]" }), "シェルを取る"]),
+        el("span", { class: "m-line hi" }, [el("span", { class: "i", text: "[+]" }), "root を取る"]),
+      ]),
+    ]);
+    main.appendChild(pathEl([]));
+    main.appendChild(el("section", { class: "hero" }, [
+      el("div", {}, [
+        h1,
+        el("p", { class: "tag", text: D.meta.tagline || "列挙から root まで。" }),
+        el("p", { class: "sub", text: D.meta.subtitle || "" }),
+        el("div", { class: "hero-actions" }, [
+          adCat ? el("a", { class: "btn primary", href: catHref("ad"), text: "AD から始める" }) : null,
+          scanCat ? el("a", { class: "btn", href: catHref("scan"), text: "スキャンの流れ" }) : null,
+        ]),
+      ]),
+      heroTerm,
+    ]));
+
+    main.appendChild(el("div", { class: "kicker", text: "// OVERVIEW" }));
+    main.appendChild(el("h2", { class: "sec", text: "これは何？" }));
+    main.appendChild(el("p", { class: "page-desc", text: "Obsidian のチートシートをそのまま引けるようにしたもの。上の欄を埋めると、すべてのコマンドにその値が入る。" }));
+    main.appendChild(el("div", { class: "stats" }, [
+      el("div", { class: "stat" }, [el("b", { text: String(D.meta.note_count) }), el("span", { text: "ノート" })]),
+      el("div", { class: "stat" }, [el("b", { text: String(cmdCount) }), el("span", { text: "コマンド" })]),
+      el("div", { class: "stat" }, [el("b", { text: String(CATS.length) }), el("span", { text: "カテゴリ" })]),
+      el("div", { class: "stat" }, [el("b", { text: String(CAT_BY_ID.cve ? CAT_BY_ID.cve.count : VARS.length) }), el("span", { text: CAT_BY_ID.cve ? "CVE" : "変数" })]),
+    ]));
+
+    var recent = lsArr(LS.recent).filter(function (id) { return NOTES[id]; });
+    if (recent.length) {
+      main.appendChild(el("div", { class: "kicker", text: "// RECENT" }));
+      main.appendChild(el("h2", { class: "sec", text: "最近見たノート" }));
+      main.appendChild(el("div", { class: "recent" }, recent.map(function (id) { return el("a", { href: noteHref(id), text: id }); })));
+    }
+
+    main.appendChild(el("div", { class: "kicker", text: "// KNOWLEDGE BASE" }));
+    main.appendChild(el("h2", { class: "sec", text: "道筋を作る" }));
+    main.appendChild(el("div", { class: "cards" }, CATS.map(function (c) {
+      return el("a", { class: "card", href: catHref(c.id) }, [
+        el("div", { class: "ic", text: c.icon || "›" }),
+        el("h3", { text: c.title }),
+        el("p", { text: c.desc }),
+        el("span", { class: "cnt", text: c.count + " NOTES" }),
+      ]);
+    })));
+
+    var pb = CAT_BY_ID.playbook;
+    if (pb) {
+      var lines = [el("span", { class: "m-line cmdline" }, [el("span", { class: "prompt", text: "$" }), "./" + short + " --methodology"])];
+      var ids = [];
+      pb.groups.forEach(function (g) { ids = ids.concat(g.notes); });
+      ids.forEach(function (id, i) {
+        var n = NOTES[id];
+        var num = "[" + String(i + 1).padStart(2, "0") + "]";
+        lines.push(el("span", { class: "m-line" + (i === ids.length - 1 ? " hi" : "") }, [
+          el("span", { class: "i", text: num }),
+          el("a", { href: noteHref(id), text: id, title: n.scene || "" }),
+        ]));
+      });
+      main.appendChild(el("div", { class: "kicker", text: "// WORKFLOW" }));
+      main.appendChild(el("h2", { class: "sec", text: "方法論" }));
+      main.appendChild(el("div", { class: "terminal" }, [
+        el("div", { class: "t-head" }, [dotsEl(), el("span", { class: "t-title", text: short })]),
+        el("div", { class: "t-body" }, lines),
+      ]));
+    }
+  }
+
+  // ------------------------------------------------------------ カテゴリ（Browse + ツール詳細）
+  function renderCategory(main, cat, noteId, slug) {
+    CUR.catId = cat.id; CUR.noteId = noteId;
+    var note = noteId ? NOTES[noteId] : null;
+    document.title = (note ? note.title + " | " : cat.title + " | ") + D.meta.title;
+    setWorkspace("/" + catSlug(cat) + (note ? "/" + note.title : ""));
+    main.appendChild(pathEl([el("a", { href: catHref(cat.id), text: catSlug(cat) })].concat(note ? [note.title] : [])));
+    main.appendChild(el("h1", { class: "page-title", text: cat.title }));
+    main.appendChild(el("p", { class: "page-desc", text: cat.desc }));
+
+    var browse = el("nav", { class: "browse", "aria-label": "Browse" }, [el("div", { class: "browse-label", text: "BROWSE" })]);
+    var multi = cat.groups.length > 1;
+    cat.groups.forEach(function (g) {
+      if (multi) browse.appendChild(el("div", { class: "browse-group", text: g.title }));
+      g.notes.forEach(function (id) {
+        var n = NOTES[id];
+        browse.appendChild(el("a", { href: noteHref(id), class: id === noteId ? "active" : "", title: n.scene || "", "aria-current": id === noteId ? "page" : null }, [
+          el("span", { class: "chev", text: "›" }), n.title,
+        ]));
+      });
+    });
+    if (!cat.groups.length) browse.appendChild(el("p", { class: "acc-empty", text: "このカテゴリにはまだノートが無い" }));
+
+    var detail = el("div", { class: "detail" });
+    if (note) renderTool(detail, note);
+    main.appendChild(el("div", { class: "ws" }, [browse, detail]));
+    var act = browse.querySelector("a.active");
+    if (act && browse.scrollHeight > browse.clientHeight) browse.scrollTop = Math.max(0, act.offsetTop - browse.clientHeight / 2);
+    if (note) {
+      pushRecent(note.id);
+      if (slug) setTimeout(function () { jumpTo(detail, slug); }, 30);
+    }
+  }
+
+  function pushRecent(id) {
+    var r = lsArr(LS.recent).filter(function (x) { return x !== id; });
+    r.unshift(id);
+    lsSet(LS.recent, r.slice(0, 8));
+  }
+
+  function renderTool(box, n) {
+    box.appendChild(el("h2", { class: "tool-title", text: n.title }));
+    if (n.scene) box.appendChild(el("p", { class: "tool-desc", text: n.scene }));
+    if (n.intro) box.appendChild(el("p", { class: "tool-intro", text: n.intro }));
+    var meta = el("div", { class: "tool-meta" }, [
+      el("span", { text: n.folder }),
+      n.mtime ? el("span", { text: "更新 " + n.mtime }) : null,
+      el("a", { href: "obsidian://open?vault=" + enc(D.meta.vault_name) + "&file=" + enc(n.path.replace(/\.md$/, "")), text: "Obsidian で開く" }),
+    ]);
+    if (n.keywords && n.keywords.length) meta.appendChild(el("span", { class: "kw", text: n.keywords.slice(0, 8).join(" / ") }));
+    box.appendChild(meta);
+
+    var stepSecs = (n.sections || []).filter(function (s) { return s.kind !== "syntax"; });
+    var withCmd = stepSecs.filter(function (s) { return s.ncmd > 0; }).length;
+    var standalone = n.kind === "playbook" || !stepSecs.length || withCmd / stepSecs.length < 0.5;
+
+    if (standalone) {
+      // プレイブック（チェックリスト）と、手順の半分以上にコマンドが無い分岐表・判断ノートは全文をそのまま表示
+      var sb = el("div", { class: "note-body standalone", html: n.html });
+      enhanceNoteBody(sb, n);
+      box.appendChild(sb);
+    } else {
+      var tpl = document.createElement("template");
+      tpl.innerHTML = n.html;
+      (n.sections || []).filter(function (s) { return s.kind === "syntax"; }).forEach(function (s) {
+        var cmds = [];
+        s.subs.forEach(function (sub) { cmds = cmds.concat(sub.cmds); });
+        if (cmds.length) box.appendChild(el("div", { class: "syntax" }, [terminal(cmds, "構文 — まずこれ")]));
+      });
+      var acc = el("div", { class: "acc" });
+      var toggleAll = el("button", { class: "btn-ghost", type: "button", text: "すべて開く" });
+      toggleAll.addEventListener("click", function () {
+        var items = $$("details", acc);
+        var allOpen = items.every(function (d) { return d.open; });
+        items.forEach(function (d) { d.open = !allOpen; });
+        toggleAll.textContent = allOpen ? "すべて開く" : "すべて閉じる";
+      });
+      box.appendChild(el("div", { class: "tool-tools" }, [toggleAll]));
+      stepSecs.forEach(function (s, i) {
+        var title = s.title || ("手順 " + (i + 1));
+        var det = el("details", { id: "sec-" + s.slug, open: i === 0 });   // getSH と同じく先頭以外は閉じておく
+        det.appendChild(el("summary", {}, [el("span", { text: title }), el("span", { class: "n", text: s.ncmd ? s.ncmd + " cmd" : "" }), chevSvg("chev")]));
+        var body = el("div", { class: "acc-body" });
+        var any = s.subs.some(function (sub) { return sub.cmds.length > 0; });
+        if (any) {
+          if (s.lead) body.appendChild(el("p", { class: "lead", html: captionHtml(s.lead) }));
+          s.subs.forEach(function (sub) {
+            if (sub.title) body.appendChild(el("h4", { class: "sub-title", text: sub.title }));
+            if (sub.cmds.length) body.appendChild(terminal(sub.cmds, sub.title || ""));
+          });
+        } else {
+          // コマンドが無い手順（判断表・ペイロード表など）は、その節の本文をそのまま埋め込む
+          var frag = sectionFragment(tpl, s.slug);
+          if (frag) {
+            var nb2 = el("div", { class: "note-body embedded" });
+            nb2.appendChild(frag);
+            enhanceNoteBody(nb2, n);
+            body.appendChild(nb2);
+          } else {
+            body.appendChild(el("p", { class: "acc-empty", text: "この手順にコマンドは無い（判断・確認のみ）。" }));
+          }
+        }
+        det.appendChild(body);
+        acc.appendChild(det);
+      });
+      box.appendChild(acc);
+
+      // 詳細（元ノートの全文: 書き換える場所・オプション表・出力例・詰まったら・関連）
+      var fd = el("details", { id: "full-detail" });
+      fd.appendChild(el("summary", {}, [el("span", { text: "詳細 — 書き換える場所 / オプション / 出力例 / 詰まったら / 関連" }), chevSvg("chev")]));
+      var nb = el("div", { class: "note-body", html: n.html });
+      enhanceNoteBody(nb, n);
+      fd.appendChild(nb);
+      box.appendChild(el("div", { class: "full" }, [fd]));
+    }
+    if (n.backlinks && n.backlinks.length) {
+      box.appendChild(el("p", { class: "muted backlinks" }, ["このノートへのリンク: "].concat(n.backlinks.slice(0, 12).map(function (id, i) {
+        return el("span", {}, [i ? ", " : "", el("a", { href: noteHref(id), text: id })]);
+      }))));
+    }
+  }
+
+  // n.html のうち <h2 id="slug"> から次の h1/h2 までを複製して返す
+  function sectionFragment(tpl, slug) {
+    var heads = tpl.content.querySelectorAll("h1, h2"), h = null;
+    for (var i = 0; i < heads.length; i++) if (heads[i].id === slug) { h = heads[i]; break; }
+    if (!h) return null;
+    var frag = document.createDocumentFragment(), node = h.nextSibling, count = 0;
+    while (node && !(node.nodeType === 1 && /^H[12]$/.test(node.tagName))) { frag.appendChild(node.cloneNode(true)); node = node.nextSibling; count++; }
+    return count ? frag : null;
+  }
+
+  function jumpTo(box, slug) {
+    var t = document.getElementById("sec-" + slug);
+    if (t) { t.open = true; t.scrollIntoView({ block: "start" }); return; }
+    var inBody = $$(".note-body [id]", box).filter(function (e) { return e.id === slug; })[0] || document.getElementById(slug);
+    if (inBody) {
+      var fd = inBody.closest("details");
+      while (fd) { fd.open = true; fd = fd.parentElement ? fd.parentElement.closest("details") : null; }
+      inBody.scrollIntoView({ block: "start" });
+    }
+  }
+
+  // 詳細の本文: コードブロックにコピー、タスクの保存
+  function enhanceNoteBody(root, n) {
+    if (root.classList.contains("standalone")) {
+      var seg = [];
+      var flush = function () {
+        var hasCmd = seg.some(function (e) { return (e.matches && e.matches(".code:not(.code-out)")) || e.querySelector(".code:not(.code-out)"); });
+        if (!hasCmd) seg.forEach(function (e) { if (e.matches && e.matches("details.callout")) e.open = true; $$("details.callout", e).forEach(function (d) { d.open = true; }); });
+        seg = [];
+      };
+      Array.prototype.slice.call(root.children).forEach(function (e) { if (/^H[12]$/.test(e.tagName)) flush(); else seg.push(e); });
+      flush();
+    }
+    $$(".code", root).forEach(function (c) {
+      var pre = $("pre", c);
+      if (!pre) return;
+      var bar = el("div", { class: "code-bar" }, [el("span", { class: "lang", text: c.dataset.lang || "" })]);
+      if (!c.classList.contains("code-out")) {
+        var b = el("button", { class: "btn-ghost", type: "button", text: "コピー" });
+        b.addEventListener("click", function () { copyCmd(pre.textContent.replace(/\s+$/, ""), b); });
+        bar.appendChild(b);
+      }
+      c.insertBefore(bar, pre);
+    });
+    var boxes = $$(".task-box", root);
+    if (boxes.length) {
+      var key = "cs.tasks." + n.id;
+      var saved = lsArr(key);
+      boxes.forEach(function (b) { b.checked = saved.indexOf(parseInt(b.dataset.task, 10)) >= 0; });
+      var counter = el("span");
+      var update = function () {
+        var done = boxes.filter(function (b) { return b.checked; }).map(function (b) { return parseInt(b.dataset.task, 10); });
+        lsSet(key, done);
+        counter.textContent = done.length + "/" + boxes.length + " 完了";
+      };
+      boxes.forEach(function (b) { b.addEventListener("change", update); });
+      var reset = el("button", { class: "btn-ghost", type: "button", text: "チェックをリセット" });
+      reset.addEventListener("click", function () { boxes.forEach(function (b) { b.checked = false; }); update(); });
+      root.insertBefore(el("div", { class: "task-tools" }, [counter, reset]), root.firstChild);
+      update();
+    }
+  }
+
+  // ------------------------------------------------------------ 外部リファレンス / 404
+  function renderExt(main) {
+    CUR.noteId = null; CUR.catId = "ext";
+    document.title = "外部リファレンス | " + D.meta.title;
+    setWorkspace("/external");
+    main.appendChild(pathEl(["external"]));
+    main.appendChild(el("h1", { class: "page-title", text: "外部リファレンス" }));
+    main.appendChild(el("p", { class: "page-desc", text: "Vault 内に手順が無い、思い出せない時に見る。" }));
+    main.appendChild(el("div", { class: "ext-list" }, (D.external || []).map(function (x) {
+      return el("a", { class: "card", href: x.url, target: "_blank", rel: "noopener noreferrer" }, [
+        el("h3", { text: x.title }), el("span", { class: "cnt", text: "↗" }), el("p", { text: x.scene }), el("span", { class: "url", text: x.url }),
+      ]);
+    })));
+  }
+  function renderNotFound(main, id) {
+    CUR.noteId = null; CUR.catId = "";
+    document.title = "見つかりません | " + D.meta.title;
+    setWorkspace("/404");
+    main.appendChild(pathEl(["404"]));
+    main.appendChild(el("h1", { class: "page-title", text: "ノートが見つかりません" }));
+    main.appendChild(el("p", { class: "page-desc" }, [el("code", { text: id }), " は Vault に無いか、名前が変わった。", el("a", { href: "#/", text: "ホームへ戻る" })]));
+  }
+
+  // ------------------------------------------------------------ 検索
   var IDX = null;
   function buildIndex() {
-    var moc = {}, sec = {};
-    D.nav.forEach(function (g) {
-      g.sections.forEach(function (s) {
-        s.entries.forEach(function (e) {
-          [e.note].concat(e.also || []).forEach(function (id) {
-            if (!moc[id]) moc[id] = [];
-            if (e.scene && moc[id].indexOf(e.scene) < 0) moc[id].push(e.scene);
-            if (!sec[id]) sec[id] = [];
-            if (g.id !== "folder" && sec[id].indexOf(s.title) < 0) sec[id].push(s.title);  // セクション名（例: 1433 - ms-sql-s）も検索対象
-          });
-        });
-      });
-    });
-    IDX = Object.keys(D.notes).map(function (id) {
-      var n = D.notes[id];
+    IDX = Object.keys(NOTES).map(function (id) {
+      var n = NOTES[id];
+      var g = NOTE_GROUP[id] || {};
+      var secs = (n.sections || []).map(function (s) { return { t: s.title, tl: s.title.toLowerCase(), slug: s.slug }; });
+      var cmds = (n.commands || []).map(function (c) { return { t: c.text, tl: c.text.toLowerCase(), c: c.comment || "", cl: (c.comment || "").toLowerCase() }; });
       var kw = (n.keywords || []).join(" / ");
-      var mocS = (moc[id] || []).filter(function (s) { return s !== n.scene; }).join(" / ");
-      var secS = (sec[id] || []).join(" / ");
-      return {
-        id: id, title: n.title, tl: n.title.toLowerCase(), folder: n.folder,
-        kw: kw, kwl: kw.toLowerCase(),
-        sec: secS, secl: secS.toLowerCase(),
-        moc: mocS, mocl: mocS.toLowerCase(),
-        scene: n.scene || "", scenel: (n.scene || "").toLowerCase(),
-        heads: (n.headings || []).map(function (h) { return { t: h.text, tl: h.text.toLowerCase(), slug: h.slug }; }),
-        cmds: (n.commands || []).map(function (c) { return { t: c.text, tl: c.text.toLowerCase(), c: c.comment || "", cl: (c.comment || "").toLowerCase() }; })
-      };
+      var cat = (g.cat ? g.cat.title + " / " : "") + (g.group ? g.group.title : "");
+      return { id: id, title: n.title, tl: n.title.toLowerCase(), kw: kw, kwl: kw.toLowerCase(), scene: n.scene || "", scenel: (n.scene || "").toLowerCase(), cat: cat, catl: cat.toLowerCase(), secs: secs, cmds: cmds };
     });
+  }
+  function hasTerm(s, term) {
+    if (term.length > 2 && term.charAt(0) !== "-") return s.indexOf(term) >= 0;
+    var re = new RegExp("(^|[\\s/・(（,])" + term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "($|[\\s/・)）,])");
+    return re.test(s);
   }
   function search(q) {
     if (!IDX) buildIndex();
     var terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
     if (!terms.length) return [];
     var out = [];
-    for (var i = 0; i < IDX.length; i++) {
-      var it = IDX[i], score = 0, ok = true;
-      var hit = { head: null, cmd: null, kw: false, moc: false, scene: false, sec: false, title: false };
+    IDX.forEach(function (it) {
+      var score = 0, hit = { sec: null, cmd: null, field: "" };
       for (var t = 0; t < terms.length; t++) {
         var term = terms[t], w = 0;
-        if (it.tl.indexOf(term) >= 0) { w = 10 + (it.tl.indexOf(term) === 0 ? 3 : 0); hit.title = true; }
-        if (it.kwl.indexOf(term) >= 0) { w = Math.max(w, 6); hit.kw = true; }
-        if (it.mocl.indexOf(term) >= 0) { w = Math.max(w, 5); hit.moc = true; }
-        if (it.scenel.indexOf(term) >= 0) { w = Math.max(w, 5); hit.scene = true; }
-        if (it.secl.indexOf(term) >= 0) { w = Math.max(w, 5); hit.sec = true; }
-        {
-          for (var h = 0; h < it.heads.length; h++) {
-            if (it.heads[h].tl.indexOf(term) >= 0) { w = Math.max(w, 3); if (!hit.head) hit.head = it.heads[h]; break; }
-          }
-        }
-        if (w < 6) {
-          for (var c = 0; c < it.cmds.length; c++) {
-            if (it.cmds[c].tl.indexOf(term) >= 0 || it.cmds[c].cl.indexOf(term) >= 0) { w = Math.max(w, 2); if (!hit.cmd) hit.cmd = it.cmds[c]; break; }
-          }
-        }
-        if (!w) { ok = false; break; }
+        var weak = term.charAt(0) === "-" || term.length <= 2;   // オプション名や 2 文字語はノート名に含まれても弱い証拠
+        if (hasTerm(it.tl, term)) { w = weak ? 4 : 10 + (it.tl.indexOf(term) === 0 ? 3 : 0); hit.field = hit.field || "title"; }
+        if (hasTerm(it.kwl, term)) { w = Math.max(w, weak ? 3 : 6); hit.field = hit.field || "kw"; }
+        if (hasTerm(it.scenel, term)) { w = Math.max(w, 5); hit.field = hit.field || "scene"; }
+        if (it.catl.indexOf(term) >= 0) { w = Math.max(w, 4); hit.field = hit.field || "cat"; }
+        for (var s = 0; s < it.secs.length; s++) if (it.secs[s].tl.indexOf(term) >= 0) { w = Math.max(w, 3); if (!hit.sec) hit.sec = it.secs[s]; break; }
+        if (w < 6) for (var c = 0; c < it.cmds.length; c++) if (it.cmds[c].tl.indexOf(term) >= 0 || it.cmds[c].cl.indexOf(term) >= 0) { w = Math.max(w, 2); if (!hit.cmd) hit.cmd = it.cmds[c]; break; }
+        if (!w) { score = 0; break; }
         score += w;
       }
-      if (!ok) continue;
-      score -= Math.min(it.title.length, 60) / 100;
-      out.push({ it: it, score: score, hit: hit });
-    }
+      if (score) out.push({ it: it, score: score - Math.min(it.title.length, 60) / 100, hit: hit });
+    });
     out.sort(function (a, b) { return b.score - a.score || (a.it.title < b.it.title ? -1 : 1); });
     return out.slice(0, 40);
   }
-  // text の中の terms を <mark> で囲んだ断片を返す（textContent のみ使用）
   function markText(text, terms, maxLen) {
     var frag = document.createDocumentFragment();
-    var low = text.toLowerCase();
-    var first = -1;
+    var low = text.toLowerCase(), first = -1;
     terms.forEach(function (t) { var p = low.indexOf(t); if (p >= 0 && (first < 0 || p < first)) first = p; });
     var start = 0;
-    if (maxLen && text.length > maxLen && first > maxLen * 0.4) {
-      start = Math.max(0, first - Math.floor(maxLen * 0.4));
-    }
+    if (maxLen && text.length > maxLen && first > maxLen * 0.4) start = Math.max(0, first - Math.floor(maxLen * 0.4));
     var end = maxLen ? Math.min(text.length, start + maxLen) : text.length;
     if (start > 0) frag.appendChild(document.createTextNode("…"));
     var pos = start;
     while (pos < end) {
       var best = -1, bestLen = 0;
-      terms.forEach(function (t) {
-        var p = low.indexOf(t, pos);
-        if (p >= 0 && p < end && (best < 0 || p < best)) { best = p; bestLen = t.length; }
-      });
+      terms.forEach(function (t) { var p = low.indexOf(t, pos); if (p >= 0 && p < end && (best < 0 || p < best)) { best = p; bestLen = t.length; } });
       if (best < 0) { frag.appendChild(document.createTextNode(text.slice(pos, end))); break; }
       if (best > pos) frag.appendChild(document.createTextNode(text.slice(pos, best)));
       frag.appendChild(el("mark", { text: text.slice(best, best + bestLen) }));
@@ -1256,167 +718,102 @@
     return frag;
   }
   var PAL = { open: false, sel: 0, items: [] };
-  function openPalette(preset) {
+  function openPalette() {
     var p = $("#palette"), inp = $("#pal-input");
-    p.hidden = false;
-    PAL.open = true;
-    if (typeof preset === "string") inp.value = preset;
-    renderPalette();
-    inp.focus();
-    inp.select();
+    p.hidden = false; PAL.open = true;
+    renderPalette(); inp.focus(); inp.select();
   }
-  function closePalette() {
-    if (!PAL.open) return;
-    $("#palette").hidden = true;
-    PAL.open = false;
-  }
+  function closePalette() { var p = $("#palette"); if (!p.hidden) { p.hidden = true; PAL.open = false; } }
   function renderPalette() {
     var inp = $("#pal-input"), list = $("#pal-list");
-    var q = inp.value;
+    var q = inp.value, terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
     list.textContent = "";
-    PAL.items = [];
-    PAL.sel = 0;
-    var terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    if (!terms.length) {
-      var recent = getRecent();
-      list.appendChild(el("li", { class: "pal-sub", text: recent.length ? "最近見たノート" : "ノート名・検索語・コマンドで探す（スペース区切りで AND）" }));
-      recent.forEach(function (id) {
-        var n = D.notes[id];
-        PAL.items.push({ href: noteHref(id) });
-        list.appendChild(palItem(n.title, null, n.folder, n.scene || "", [], true));
-      });
-      refreshPalSel();
-      return;
-    }
-    var res = search(q);
-    if (!res.length) {
-      list.appendChild(el("li", { class: "pal-empty", text: "一致するノートがありません" }));
-      return;
-    }
-    res.forEach(function (r) {
+    PAL.items = search(q);
+    if (PAL.sel >= PAL.items.length) PAL.sel = 0;
+    if (!terms.length) { list.appendChild(el("li", { class: "pal-empty", text: "ノート名・検索語・手順名・コマンドで探す" })); return; }
+    if (!PAL.items.length) { list.appendChild(el("li", { class: "pal-empty", text: "一致するノートがありません" })); return; }
+    PAL.items.forEach(function (r, i) {
       var it = r.it, hit = r.hit;
-      var href = noteHref(it.id, hit.head && !hit.title ? hit.head.slug : "");  // 見出しを表示する時はその見出しへ飛ぶ
-      var sub = null, ex = "", mono = false;
-      if (hit.head && !hit.title) { sub = hit.head.t; }
-      if (hit.kw) ex = it.kw;
-      else if (hit.scene) ex = it.scene;
-      else if (hit.moc) ex = it.moc;
-      else if (hit.cmd) { ex = hit.cmd.c ? hit.cmd.c + "  $ " + hit.cmd.t : hit.cmd.t; mono = true; }
-      else ex = it.scene || it.kw;
-      PAL.items.push({ href: href });
-      list.appendChild(palItem(it.title, sub, it.folder, ex, terms, !mono));
+      var showSec = hit.sec && hit.field !== "title";
+      var href = noteHref(it.id, showSec ? hit.sec.slug : "");
+      var li = el("li", { class: i === PAL.sel ? "sel" : "", role: "option", dataset: { href: href } });
+      var pt = el("span", { class: "pt" }); pt.appendChild(markText(it.title, terms));
+      if (showSec) { pt.appendChild(document.createTextNode(" › ")); pt.appendChild(markText(hit.sec.t, terms)); }
+      li.appendChild(pt);
+      li.appendChild(el("span", { class: "pc", text: it.cat }));
+      var useCmd = hit.cmd && !showSec && hit.field !== "title" && hit.field !== "kw" && hit.field !== "scene";
+      var ex = el("span", { class: "px" + (useCmd ? " mono" : "") });
+      if (useCmd) ex.appendChild(markText((hit.cmd.c ? hit.cmd.c + "  $ " : "$ ") + hit.cmd.t, terms, 110));
+      else ex.appendChild(markText(it.scene || it.kw, terms, 110));
+      li.appendChild(ex);
+      li.addEventListener("mousemove", function () { if (PAL.sel !== i) { PAL.sel = i; $$("li", list).forEach(function (x, k) { x.classList.toggle("sel", k === i); }); } });
+      li.addEventListener("click", function () { go(href); });
+      list.appendChild(li);
     });
-    refreshPalSel();
-  }
-  function palItem(title, sub, folder, excerpt, terms, sans) {
-    var idx = PAL.items.length - 1;
-    var li = el("li", { role: "option", dataset: { i: String(idx) } });
-    var r1 = el("div", { class: "r1" }, el("span", { class: "pt" }, terms.length ? markText(title, terms) : title));
-    if (sub) r1.appendChild(el("span", { class: "ph2" }, "› ", markText(sub, terms)));
-    r1.appendChild(el("span", { class: "pf", text: folder }));
-    li.appendChild(r1);
-    if (excerpt) li.appendChild(el("div", { class: "r2" + (sans ? " sans" : "") }, markText(excerpt, terms, 140)));
-    li.addEventListener("mousemove", function () { if (PAL.sel !== idx) { PAL.sel = idx; refreshPalSel(false); } });
-    li.addEventListener("click", function () { go(PAL.items[idx].href); });
-    return li;
-  }
-  function refreshPalSel(scroll) {
-    var lis = $$("#pal-list li[role='option']");
-    lis.forEach(function (li, i) { li.classList.toggle("sel", i === PAL.sel); li.setAttribute("aria-selected", i === PAL.sel ? "true" : "false"); });
-    if (scroll !== false && lis[PAL.sel]) lis[PAL.sel].scrollIntoView({ block: "nearest" });
   }
   function go(href) {
     closePalette();
     if (location.hash === href) route(); else location.hash = href;
   }
-  function initPalette() {
+
+  // ------------------------------------------------------------ 起動
+  function bind() {
+    $("#menu-btn").addEventListener("click", function () { if ($("#sidebar").classList.contains("open")) closeSidebar(); else openSidebar(); });
+    $("#backdrop").addEventListener("click", closeSidebar);
+    $("#quick-search").addEventListener("click", openPalette);
+    $("#vars-more").addEventListener("click", function () { UI.extraOpen = !UI.extraOpen; renderVars(); });
+    $("#vars-toggle").addEventListener("click", function () {
+      var tb = $("#topbar"); tb.classList.toggle("vars-open");
+      $("#vars-toggle").setAttribute("aria-expanded", tb.classList.contains("vars-open") ? "true" : "false");
+    });
+    $("#vars-clear").addEventListener("click", function () {
+      UNDO = JSON.parse(JSON.stringify(V.values));
+      allKeys().forEach(function (k) { V.values[k] = ""; });
+      saveVars(); renderVars(); applyVars();
+      $("#vars-undo").hidden = false;
+      toast("変数をすべて消した（元に戻すで復元できる）");
+    });
+    $("#vars-undo").addEventListener("click", function () {
+      if (!UNDO) return;
+      V.values = UNDO; UNDO = null; saveVars(); renderVars(); applyVars();
+      $("#vars-undo").hidden = true;
+    });
     var inp = $("#pal-input");
-    inp.addEventListener("input", renderPalette);
-    inp.addEventListener("keydown", function (ev) {
-      if (ev.key === "ArrowDown") { ev.preventDefault(); if (PAL.items.length) { PAL.sel = (PAL.sel + 1) % PAL.items.length; refreshPalSel(); } }
-      else if (ev.key === "ArrowUp") { ev.preventDefault(); if (PAL.items.length) { PAL.sel = (PAL.sel - 1 + PAL.items.length) % PAL.items.length; refreshPalSel(); } }
-      else if (ev.key === "Enter") { ev.preventDefault(); if (PAL.items[PAL.sel]) go(PAL.items[PAL.sel].href); }
-      else if (ev.key === "Escape") { ev.preventDefault(); closePalette(); }
+    inp.addEventListener("input", function () { PAL.sel = 0; renderPalette(); });
+    inp.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowDown") { e.preventDefault(); PAL.sel = Math.min(PAL.sel + 1, PAL.items.length - 1); renderPalette(); scrollSel(); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); PAL.sel = Math.max(PAL.sel - 1, 0); renderPalette(); scrollSel(); }
+      else if (e.key === "Enter") { e.preventDefault(); var li = $$("#pal-list li")[PAL.sel]; if (li && li.dataset.href) go(li.dataset.href); }
     });
-    $("#palette").addEventListener("click", function (ev) { if (ev.target === this) closePalette(); });
-    $$(".search-btn").forEach(function (b) { b.addEventListener("click", function () { openPalette(""); }); });
-  }
-  function isTyping() {
-    var a = document.activeElement;
-    if (!a) return false;
-    var tag = a.tagName;
-    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || a.isContentEditable;
-  }
-  function initKeys() {
-    document.addEventListener("keydown", function (ev) {
-      if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && (ev.key === "k" || ev.key === "K")) {
-        ev.preventDefault();
-        if (PAL.open) closePalette(); else openPalette("");
-        return;
-      }
-      if (ev.key === "Escape") {
-        if (PAL.open) { closePalette(); return; }
-        if ($("#nav").classList.contains("open")) { closeDrawer(); return; }
-        return;
-      }
-      if (ev.key === "/" && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !isTyping() && !PAL.open) {
-        ev.preventDefault();
-        openPalette("");
-      }
+    $("#palette").addEventListener("click", function (e) { if (e.target === $("#palette")) closePalette(); });
+    document.addEventListener("keydown", function (e) {
+      var tag = (e.target.tagName || "").toLowerCase();
+      var typing = tag === "input" || tag === "textarea" || tag === "select" || e.target.isContentEditable;
+      if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) { e.preventDefault(); if (PAL.open) closePalette(); else openPalette(); return; }
+      if (e.key === "Escape") { if (PAL.open) { closePalette(); return; } closeSidebar(); return; }
+      if (e.key === "/" && !typing && !PAL.open) { e.preventDefault(); openPalette(); }
     });
-  }
-
-  // ---------------------------------------------------------------- boot
-  function boot() {
-    D = window.CHEATSHEET_DATA || null;
-    initTheme();
-    if (!D || !D.notes || !D.nav) {
-      renderNoData();
-      $("#nav-tree").appendChild(el("div", { class: "nav-empty", text: "data.js がありません" }));
-      $("#vars-toggle").hidden = true;
-      $("#varbar").hidden = true;
-      updateTopH();
-      return;
-    }
-    SITE = D.meta.title || SITE;
-    $$(".brand").forEach(function (b) { $(".brand-short", b).textContent = D.meta.short || "oscp.sh"; b.title = SITE; });
-    initVarbar();
-    buildNav();
-    renderNavRecent();
-    initPalette();
-    initKeys();
-
-    // クリック委譲: コピーボタン / 同一 hash のリンク / コード本体クリックでコピー
-    $("#main").addEventListener("click", function (ev) {
-      var btn = ev.target.closest("button.copy");
-      if (btn) { ev.preventDefault(); doCopyBlock(btn); return; }
-      var a = ev.target.closest("a[href^='#/']");
-      if (a) {
-        // hash が今と同じだと hashchange が起きないので、自前で route() して再スクロールする（パレットの go() と同じ扱い）
-        if (ev.defaultPrevented || ev.button !== 0 || ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.altKey) return;
-        if (dec(a.getAttribute("href")) === dec(location.hash)) { ev.preventDefault(); route(); }
-        return;
-      }
-      var pre = ev.target.closest(".code:not(.code-out) > pre");
-      if (pre) {
-        var sel = window.getSelection();
-        if (sel && !sel.isCollapsed) return;          // 範囲選択中はコピーしない
-        var cb = $(".code-bar .copy", pre.parentNode);
-        if (cb) doCopyBlock(cb);
-      }
-    });
-
+    var sm = $("#vars-summary");
+    if (sm) sm.addEventListener("click", function () { $("#topbar").classList.toggle("pinned"); if ($("#topbar").classList.contains("pinned")) { var f = $("#vars input[type=text]"); if (f) f.focus(); } });
+    var onScroll = function () { document.body.classList.toggle("scrolled", window.scrollY > 140); };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
     window.addEventListener("hashchange", route);
-    window.addEventListener("resize", updateTopH);
-    if (window.ResizeObserver) { new ResizeObserver(updateTopH).observe($("#top")); }
-    if (window.matchMedia) {
-      var mq = window.matchMedia("(prefers-color-scheme: light)");
-      var onScheme = function (e) { if (lsGet(LS.theme, null) === null) setTheme(e.matches ? "light" : "dark", false); };
-      if (mq.addEventListener) mq.addEventListener("change", onScheme); else if (mq.addListener) mq.addListener(onScheme);
-    }
-    route();
+    // 同じ hash へのクリック（Browse の現在項目など）でも再描画する
+    document.addEventListener("click", function (e) {
+      var a = e.target.closest && e.target.closest("a[href^='#/']");
+      if (!a) return;
+      if (a.getAttribute("href") === location.hash) { e.preventDefault(); route(); }
+    });
   }
+  function scrollSel() { var li = $$("#pal-list li")[PAL.sel]; if (li && li.scrollIntoView) li.scrollIntoView({ block: "nearest" }); }
 
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
-  else boot();
+  function boot() {
+    renderNav();
+    renderVars();
+    bind();
+    route();
+    applyVars();
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
 })();
