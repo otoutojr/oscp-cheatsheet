@@ -1,0 +1,53 @@
+{
+  "site": {
+    "title": "OSCP Cheatsheet",
+    "subtitle": "列挙 → 侵入 → 昇格 → ドメイン制圧。上の欄を埋めるとコマンドに反映される。",
+    "short": "oscp.sh"
+  },
+  "vault": {
+    "path": "/home/kali/Offsec/Penetration",
+    "name": "Penetration",
+    "folders": ["10 Exploit", "11 Linux", "12 Windows", "13 CVE", "14 Methodology"],
+    "moc": "00 Cheatsheet MOC.md",
+    "pictures": "98 Picture",
+    "playbook_order": [
+      "00 OSCP Playbook",
+      "Recon",
+      "Service Enumeration",
+      "Web Enumeration Checklist",
+      "Linux Privesc Checklist",
+      "Windows Privesc Checklist",
+      "AD Enumeration Checklist",
+      "AD Domain Takeover Checklist",
+      "Pivoting Checklist",
+      "OSCP Exam Checklist",
+      "Tool Portability"
+    ]
+  },
+  "output": {
+    "dir": "docs",
+    "single_file": "oscp-cheatsheet.html"
+  },
+  "variables": [
+    { "key": "ATTACKER_IP",   "label": "自分の IP（tun0）",        "group": "attacker", "example": "192.168.45.187", "default": "" },
+    { "key": "ATTACKER_PORT", "label": "待ち受けポート",            "group": "attacker", "example": "4444",           "default": "4444" },
+    { "key": "VICTIM_IP",     "label": "攻撃対象の IP",             "group": "victim",   "example": "192.168.50.8",   "default": "" },
+    { "key": "VICTIM_PORT",   "label": "対象サービスのポート",       "group": "victim",   "example": "80",             "default": "" },
+    { "key": "VICTIM_HOST",   "label": "対象のホスト名 / FQDN",     "group": "victim",   "example": "dc01.corp.com",  "default": "" },
+    { "key": "DOMAIN",        "label": "AD ドメイン",               "group": "victim",   "example": "corp.com",       "default": "" },
+    { "key": "BASE_DN",       "label": "ドメインの DN（DOMAIN から自動）", "group": "victim", "example": "DC=corp,DC=com", "default": "", "derive": "base_dn" },
+    { "key": "USER",          "label": "ユーザー名",                "group": "cred",     "example": "pete",           "default": "" },
+    { "key": "PASSWORD",      "label": "パスワード",                "group": "cred",     "example": "Nexus123!",      "default": "", "secret": true },
+    { "key": "HASH",          "label": "NT ハッシュ",               "group": "cred",     "example": "64f12cddaa88057e06a81b54e73b949b", "default": "", "secret": true },
+    { "key": "URL",           "label": "対象 URL",                  "group": "other",    "example": "http://192.168.50.8/", "default": "" },
+    { "key": "WORDLIST",      "label": "辞書ファイル",              "group": "other",    "example": "/usr/share/wordlists/rockyou.txt", "default": "/usr/share/wordlists/rockyou.txt" },
+    { "key": "FILE",          "label": "入力ファイル",              "group": "other",    "example": "users.txt",      "default": "" },
+    { "key": "OUTPUT",        "label": "出力先",                    "group": "other",    "example": "out",            "default": "" }
+  ],
+  "variable_groups": {
+    "attacker": "攻撃側（Kali）",
+    "victim":   "攻撃対象",
+    "cred":     "資格情報",
+    "other":    "その他"
+  }
+}
